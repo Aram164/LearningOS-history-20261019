@@ -1,8 +1,10 @@
 # Reliability migration execution ledger
 
+**Current scope: the streamlined [authoritative plan](../FINAL-MIGRATION-CONTRACT.md) and [continuation](CONTINUE.md), revised at Aram's request on 18 October 2026. Earlier entries below are chronological evidence; their superseded extraction, audit, S9b and live-rollout obligations are not current requirements.**
+
 Execution requested by Aram on 18 October 2026 in the current chat. The final contract is [FINAL-MIGRATION-CONTRACT.md](../FINAL-MIGRATION-CONTRACT.md); it supersedes conflicting execution details in MIGRATION-PLAN.md. The historical planning-only limitation does not restrict the source implementation now requested. Installation, publication, live content changes and exact candidate surface approvals retain their explicit gates.
 
-## Ownership and baseline
+## Historical entry baseline
 
 - Implementer: this Codex chat; no delegated reviewer role assigned.
 - Core: `074f4717e14527798752de84b3c9c4e88348b658`, clean at entry.
@@ -12,23 +14,22 @@ Execution requested by Aram on 18 October 2026 in the current chat. The final co
 - Outer dirty work is unrelated and excluded. See baseline receipt for exact byte inventory.
 - Correction: **five** existing lineage writers (including source revision); evidence-bearing route.patch will be the sixth. Earlier four-writer statements are superseded.
 
-## Acceptance obligations
+## Acceptance status under the revised plan
 
-| ID | Obligation | Decisive evidence and control | State |
-|---|---|---|---|
-| E0 | Isolated paired candidate, quiescent captured world, independent authored/operational/vault inventory | Exact pair, input/toolchain hashes and preserved outer dirty bytes | captured |
-| E1 | Permanent strict types, protected filesystem helper, semantic write attribution, goal-ledger backup, initial finite protocol model | Impure derivation, unauthorized/hidden writes and invalid alternatives rejected | pending |
-| CLAIM | Matcher/immutable reader, shared admission and all-six-writer guards; goal/audit identity and read annotations | Final contract claim scenarios; real materials and paired timings | pending |
-| C1 | Complete paired claim gate and required actual-diff approval | Exact candidate pair, raw gate/effects/performance receipts | pending |
-| DURABILITY | S0 baseline followed by S1/S2 barriers/conflicts | Receipt-visible/barrier regression plus disabled protection; foreign edits retained | pending |
-| C2 | Complete paired engine gate | Exact candidate pair and fault/interleaving receipts | pending |
-| STRUCTURE | S3-S8 typed normalization/results/policies/imports/UI/freshness | Focused behavior/effects/type and lifecycle controls; old implementations removed | pending |
-| RECOVERY | S9 terminal branches, v3/v2 fencing, distinct resolution identity and immutable envelopes | Model/production crash traces, actual old readers, restart/replay/restore | pending |
-| C3 | Final paired source gate, independent review, runtime workflows and restore drill | Exact pair, real validator/Core, disposable Obsidian, performance budgets | pending |
-| CONTENT | Rehearse 21 repairs and preserve exact semantic/material bindings | Disposable governed receipts and single frozen audit | pending |
-| ROLLOUT | Explicitly authorized backup/deploy/content/publication | Source, install, runtime and interactions; exact-pair CI for publication | pending authorization |
+The finite acceptance inventory is maintained only in the [current plan, §5](../FINAL-MIGRATION-CONTRACT.md#5-verification-and-finite-acceptance).
 
-## Current position
+| Gate | Status |
+|---|---|
+| Baseline/completed claim work | Preserved; reconcile historical receipts with actual WIP before resumption. |
+| C1 | Pending bounded read/audit isolation, all 29 procedure classifications, full scenarios/A19, approved A11 entries and paired gate. |
+| C2 | Pending production transaction durability/conflict fixes and real fault/restart evidence. |
+| C3 | Pending bounded simplification, compact workflow, UI/simple recovery and final acceptance. |
+| S9b | Deferred; not an acceptance blocker absent a demonstrated required failure and separate review. |
+| Live content/install/release | Outside revised migration scope; separate authorization required. |
+
+## Historical execution entries
+
+### Initial execution position
 
 Persisted final amendments before implementation. Establish E0, then E1; no live learner state mutation.
 
@@ -128,3 +129,10 @@ The five-key surface packet remains awaiting Aram's dated approval. No approval 
 ## C1 surface approval — 18 October 2026
 
 Aram explicitly replied “Approve this exact C1 surface packet”. Recorded at `2026-10-18T12:33:40.070403+00:00` in [C1-SURFACE-APPROVAL.json](C1-SURFACE-APPROVAL.json), bound to immutable packet SHA256 `8e7781d6d10071e25eb0bc51cc0d068bbecffd51340946f1d82a7c107c31d2cf` and its five exact before/after keys. This supersedes earlier pending-approval notes. Candidate A11 baseline entries remain to be applied and verified at authorized resumption; source and implementation stay paused at the usage boundary. C1 remains unaccepted, with no rollout or live-content authorization.
+
+
+## Scope simplification and plan publication — 18 October 2026
+
+Aram supplied the revised v2 and explicitly directed improvement/maximization/streamlining of existing architecture without bloat, then authorized pushing updated planning documents to the migration branch. Replaced the authoritative contract, retired competing entry plans, preserved their exact originals/hashes, and rewrote the continuation. Audit expansion, unnecessary extraction and default S9b protocols are removed from required scope. C1/C2/C3 remain finite gates; production transaction correctness takes priority. Existing compact multi-unit revisions are verified to exist and must be reused.
+
+Observed the preserved implementation at Core `300a04a920a31f62734b7e367b618dca3faeb1bf` on `review/architecture-hardening-2026-10-18`; UI `a88b1188ad54439b4df32813904de182c06a105c`. Earlier tips and estimates remain historical. This plan revision changes no production code, data or acceptance result; implementation remains paused at the recorded usage boundary. Publishing plan documents is authorized; deployment, live writes and broader code commits are not authorized by this turn.
