@@ -7,6 +7,7 @@ from learning_os.derive.validation.plan_rigor import (
     ChecksPlanRigor,
     _has_unquoted_hedge,
     angle_review_fingerprint,
+    locator_binding_findings,
 )
 
 
@@ -21,6 +22,46 @@ def test_exact_title_may_contain_selection_word():
 def test_unquoted_selection_instruction_remains_vague():
     locator = "Lecture 10 'Model Selection' — selected chapters"
     assert _has_unquoted_hedge(locator)
+
+
+def _binding_route(rid, locator, file="script.pdf", unit="unit-demo"):
+    return {"id": rid, "unit_id": unit, "locator": locator,
+            "vault_path": "material://source-demo/" + file}
+
+
+def test_broadcast_shape_has_duplicate_and_wrong_file_findings():
+    rows = [_binding_route("route-script", "sheet.pdf, PDF p. 1"),
+            _binding_route("route-sheet", "sheet.pdf, PDF p. 1", "sheet.pdf")]
+    findings = locator_binding_findings("module-demo", "source-demo", rows, set())
+    assert sorted(code for code, _ in findings) == ["ROUTE-LOCATOR-DUPLICATE", "ROUTE-VAULT-LOCATOR-MISMATCH"]
+    assert "route-script" in str(findings)
+    assert "route-sheet" in str(findings)
+
+
+def test_duplicate_locators_are_bounded_by_source_and_unit():
+    rows = [_binding_route("route-a", "Ch 2, PDF pp. 1-2"),
+            _binding_route("route-b", "Ch 2,  PDF pp. 1-2", unit="unit-other")]
+    assert locator_binding_findings("module-demo", "source-demo", rows, set()) == []
+    rows[1]["unit_id"] = "unit-demo"
+    assert [code for code, _ in locator_binding_findings("module-demo", "source-demo", rows, set())] == ["ROUTE-LOCATOR-DUPLICATE"]
+
+
+def test_book_style_and_own_filename_with_other_file_are_allowed():
+    for locator in ("Chapter 2, PDF pp. 17-50", "script.pdf and sheet.pdf, PDF pp. 1-2"):
+        assert not locator_binding_findings("module-demo", "source-demo",
+                                            [_binding_route("route-a", locator)], {"sheet.pdf"})
+
+
+def test_filename_match_uses_whole_names_and_unicode_normalization():
+    import unicodedata
+
+    assert not locator_binding_findings("module-demo", "source-demo",
+        [_binding_route("route-a", "supersheet.pdf, PDF p. 1")], {"sheet.pdf"})
+    name = unicodedata.normalize("NFD", "Überblick.pdf")
+    assert not locator_binding_findings("module-demo", "source-demo",
+        [_binding_route("route-a", "ÜBERBLICK.PDF, PDF p. 1", name)], {"sheet.pdf"})
+    assert [code for code, _ in locator_binding_findings("module-demo", "source-demo",
+        [_binding_route("route-a", "sheet.pdf, PDF p. 1")], {"sheet.pdf"})] == ["ROUTE-VAULT-LOCATOR-MISMATCH"]
 
 
 class _StubChecker(ChecksPlanRigor):
@@ -346,3 +387,19 @@ def test_fingerprint_mismatch_is_stale_online_and_offline(mini_repo):
     assert checker._angle_review_current(route, stage, resource) == "stale"
     resolved.path.unlink()
     assert checker._angle_review_current(route, stage, resource) == "stale"
+
+
+def test_frozen_broadcast_has_exact_historical_findings_and_repaired_rows_have_none():
+    from pathlib import Path
+
+    import yaml
+
+    fixture = yaml.safe_load((Path(__file__).parent / "fixtures/m2-broadcast-2026-09-12.yaml").read_text())
+    old = locator_binding_findings(fixture["module_id"], fixture["source_id"],
+        fixture["revisions"]["damaged"]["routes"], {"ana_inf_serie05.pdf", "unser skript.pdf"})
+    assert sum(code == "ROUTE-LOCATOR-DUPLICATE" for code, _ in old) == 2
+    assert sum(code == "ROUTE-VAULT-LOCATOR-MISMATCH" for code, _ in old) == 3
+    duplicates = [message for code, message in old if code == "ROUTE-LOCATOR-DUPLICATE"]
+    assert sum(message.count("route-an-") for message in duplicates) == 6
+    assert locator_binding_findings(fixture["module_id"], fixture["source_id"],
+        fixture["revisions"]["repaired"]["routes"], {"ana_inf_serie05.pdf", "unser skript.pdf"}) == []

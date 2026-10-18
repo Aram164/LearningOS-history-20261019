@@ -17,6 +17,12 @@ _STATE = threading.local()
 _EVENTS: dict | None = None
 _RENDER_FN = None
 
+# Only these mechanical frames may delegate, and only to their immediate
+# production caller. An engine frame further out cannot authorize a callback.
+MECHANICAL_HELPERS = {
+    "learning_os.store.durable_fs": frozenset({"learning_os.store.transactions"}),
+}
+
 #: Events logged only while the render marker is set (SPEC §3.5b).
 _RENDER_ONLY_EVENTS = frozenset({
     "os.listdir",
@@ -261,6 +267,33 @@ def _current_phase():
         return None
 
 
+def _production_frames() -> list[tuple[str, str, int]]:
+    import traceback
+
+    result = []
+    for frame in reversed(traceback.extract_stack()):
+        filename = frame.filename.replace(os.sep, "/")
+        for marker, prefix in (("/tools/learning_os/", "learning_os."),
+                               ("/tools/migrations/", "migrations.")):
+            index = filename.rfind(marker)
+            if index >= 0:
+                relative = filename[index + len(marker):].removesuffix(".py")
+                result.append((prefix + relative.replace("/", "."), frame.filename, frame.lineno))
+                break
+    return result
+
+
+def delegated_owner(frames: list[tuple[str, str, int]]) -> str | None:
+    if not frames:
+        return None
+    helper = frames[0][0]
+    allowed = MECHANICAL_HELPERS.get(helper)
+    if allowed is None:
+        return None
+    caller = next((module for module, _, _ in frames if module != helper), None)
+    return caller if caller in allowed else None
+
+
 def _current_writer() -> tuple[str | None, str | None, int | None]:
     """The innermost writing module under tools/ (SPEC §3.6, A19).
 
@@ -272,24 +305,10 @@ def _current_writer() -> tuple[str | None, str | None, int | None]:
     ``(None, None, None)`` when no such frame exists (fail closed).
     """
     try:
-        import traceback
-
-        frames = traceback.extract_stack()
+        frames = _production_frames()
     except Exception:
         return None, None, None
-    for frame in reversed(frames):
-        filename = frame.filename.replace(os.sep, "/")
-        for marker, prefix in (("/tools/learning_os/", "learning_os."),
-                               ("/tools/migrations/", "migrations.")):
-            index = filename.rfind(marker)
-            if index < 0:
-                continue
-            relative = filename[index + len(marker):]
-            if relative.endswith(".py"):
-                relative = relative[:-3]
-            module = prefix + relative.replace("/", ".")
-            return module, frame.filename, frame.lineno
-    return None, None, None
+    return frames[0] if frames else (None, None, None)
 
 
 def _current_render():
@@ -491,6 +510,8 @@ def _hook(event: str, args) -> None:
                 "writer_line": writer_line,
             }
         if record is not None:
+            if record.get("writer") in MECHANICAL_HELPERS:
+                record["delegated_owner"] = delegated_owner(_production_frames())
             if "paths" in record:
                 record["resolved_paths"] = _operational_paths(event, args, record["paths"], record.get("mode"))
             with open(_ACTIVE_LOG, "a", encoding="utf-8") as handle:

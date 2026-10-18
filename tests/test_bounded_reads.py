@@ -192,7 +192,7 @@ def test_route_batch_matches_scalar_per_item_in_requested_order(mini_repo):
         second, first]
     for entry, rid in zip(payload["routes"], [second, first], strict=True):
         assert entry == {key: scalar[rid][key] for key in (
-            "route", "uses", "patch_fields", "patch_capability")}
+            "route", "uses", "patch_fields", "patch_capability", "claim")}
     for key in ("unit_id", "module_id", "snapshot_id", "artifact_revisions",
                 "preflight"):
         assert payload[key] == scalar[first][key]

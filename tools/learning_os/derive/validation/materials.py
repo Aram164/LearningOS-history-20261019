@@ -19,7 +19,6 @@ pre-commit hook. ``python tools/materials_manifest.py --deep`` verifies content.
 
 from __future__ import annotations
 
-import os
 import re
 import unicodedata
 from pathlib import Path
@@ -28,6 +27,7 @@ import yaml
 
 from learning_os.store.layout import PathBoundaryError, read_text_inside, resolve_symlinks_inside
 from learning_os.store.loading.yamlio import UniqueKeySafeLoader
+from learning_os.store.materials.resolution import materials_mount
 
 # Material filenames legitimately contain spaces ("unser skript.pdf"), so a
 # whitespace-delimited pattern silently truncates them. Delimited forms are
@@ -99,32 +99,10 @@ class ChecksMaterials:
         # `material://` URIs are id-based (source-<id>/…) and resolve through the
         # materials/.flat/ symlink farm. Referenced URIs must therefore be
         # translated to physical paths before the inventory can be consulted.
-        physical = repo.learningos_root / "materials"
-        tree: Path | None = physical
-        dangling = False
-        if physical.is_symlink():
-            # Paired clones and worktrees link materials/ at the real tree:
-            # the loader resolves material:// URIs through it, so the
-            # inventory verifies against the resolved target — the same
-            # bytes the reads see. Only a link to nowhere stays offline.
-            try:
-                tree = physical.resolve(strict=True)
-            except (OSError, RuntimeError):
-                tree, dangling = None, True
-        if tree is None or not tree.is_dir():
-            if dangling:
-                why = f"materials symlink at {physical} points nowhere"
-            else:
-                why = f"materials tree not mounted at {physical}"
+        tree, why = materials_mount(repo)
+        if tree is None:
             self.warn("MATERIALS-OFFLINE",
                       f"{why} — "
-                      f"{len(recorded)} inventoried file(s) unverified this run "
-                      "(the manifest still records what belongs there)",
-                      "records/materials-manifest.yaml")
-            return
-        if not os.access(tree, os.R_OK | os.X_OK):
-            self.warn("MATERIALS-OFFLINE",
-                      f"materials tree at {physical} is not readable — "
                       f"{len(recorded)} inventoried file(s) unverified this run "
                       "(the manifest still records what belongs there)",
                       "records/materials-manifest.yaml")

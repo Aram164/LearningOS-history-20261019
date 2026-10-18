@@ -47,6 +47,26 @@ markers = [
   "migrations: migrations and multi-year format compatibility",
 ]
 
+# Migration boundaries remain strict while imported legacy modules retain their
+# existing diagnostics. Every new production module must join this maintained
+# list; test_arch_types compares it with the frozen pre-migration inventory.
+[tool.mypy]
+strict = true
+follow_imports = "silent"
+disallow_any_unimported = true
+disallow_any_explicit = true
+mypy_path = "tools"
+cache_dir = "/dev/null"
+files = [
+  "tools/learning_os/domain/transaction.py",
+  "tools/learning_os/app/claim_admission.py",
+  "tools/learning_os/derive/semantics/claim_status.py",
+  "tools/learning_os/derive/semantics/claim_audits.py",
+  "tools/learning_os/domain/verbatim.py",
+  "tools/learning_os/store/materials/pdf_text.py",
+  "tools/learning_os/store/materials/anchors.py",
+]
+
 # Linting (engineering review 2026-08-18, item 12; added 2026-08-21).
 #
 # The review's argument for a linter was not style. Three of the five Tier-1

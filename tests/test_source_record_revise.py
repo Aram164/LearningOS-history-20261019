@@ -347,9 +347,9 @@ def test_attach_refuses_when_an_approved_dossier_basis_moves(mini_repo, tmp_path
     (row,) = body["diff"]
     assert row["affected_units"] == ["unit-demo-l01"]
     assert row["replacements"] == {"unit-demo-l01": replacement}
-    assert body["artifact_ids"] == ["source-demo-book", "unit-demo-l01"]
+    assert body["artifact_ids"] == ["file:operations/transactions/lineage.yaml", "source-demo-book", "unit-demo-l01"]
     assert set(body["expected_revisions"]) == {
-        "source-demo-book", "unit-demo-l01"}
+        "source-demo-book", "unit-demo-l01", "file:operations/transactions/lineage.yaml"}
 
 
 def test_attach_refuses_a_live_basis_replacement(mini_repo, tmp_path):
@@ -420,12 +420,12 @@ def _shaped_setup(mini_repo: Path):
 
 
 def _assert_dossier_lineage(root, dossier, response):
+    from learning_os.derive.semantics.claim_status import live_evidence_digest
     from learning_os.derive.semantics.lineage import (
         CONTRACT_VERSION,
         effective_statuses,
         load_ledger,
     )
-    from learning_os.derive.semantics.scan import live_evidence_digest
 
     records = load_ledger(root)
     claim_id = f"dossier:{dossier['id']}"
@@ -468,12 +468,12 @@ def test_rebase_shortcut_rebases_one_screened_route(mini_repo, tmp_path):
     assert moved["route_id"] == "route-demo-grinstead"
     assert moved["before"] != moved["after"]
     assert moved["reason"] == live["route_assessments"][-1]["reason"]
-    assert body["artifact_ids"] == ["source-demo-book", "unit-demo-l01"]
+    assert body["artifact_ids"] == ["file:operations/transactions/lineage.yaml", "source-demo-book", "unit-demo-l01"]
     applied = approved_v2_call(
         mini_repo, capability="source.record.revise",
         payload={"record": record,
                  "expected_diff_sha256": body["diff_sha256"]},
-        artifact_ids=["source-demo-book", "unit-demo-l01"],
+        artifact_ids=["file:operations/transactions/lineage.yaml", "source-demo-book", "unit-demo-l01"],
         idempotency_key="revise-apply-rebase")
     assert applied.returncode == 0, applied.stderr + applied.stdout
     written = yaml.safe_load(
@@ -589,7 +589,7 @@ def test_rebase_refuses_a_dossier_changed_after_check(mini_repo, tmp_path):
         mini_repo, capability="source.record.revise",
         payload={"record": record,
                  "expected_diff_sha256": checked["diff_sha256"]},
-        artifact_ids=["source-demo-book", "unit-demo-l01"],
+        artifact_ids=["file:operations/transactions/lineage.yaml", "source-demo-book", "unit-demo-l01"],
         idempotency_key="revise-rebase-raced")
     outer = json.loads(proc.stdout)["error"]["message"]
     assert "changed since" in json.loads(outer)["error"]
@@ -863,7 +863,7 @@ def test_apply_writes_source_and_replacement_atomically(mini_repo, tmp_path):
         mini_repo, capability="source.record.revise",
         payload={"record": record,
                  "expected_diff_sha256": checked["diff_sha256"]},
-        artifact_ids=["source-demo-book", "unit-demo-l01"],
+        artifact_ids=["file:operations/transactions/lineage.yaml", "source-demo-book", "unit-demo-l01"],
         idempotency_key="revise-apply-dossier")
     assert proc.returncode == 0, proc.stderr + proc.stdout
     body = json.loads(proc.stdout)

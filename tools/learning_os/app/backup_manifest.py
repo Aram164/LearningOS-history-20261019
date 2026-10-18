@@ -341,6 +341,9 @@ def build_backup_manifest(
     ui_root = authorities["ui"]
     materials_root = authorities["materials"]
     contract = _load_contract(root)
+    omitted = undeclared_operational_writes(root)
+    if omitted:
+        raise BackupManifestError("backup omits durable operational writes: " + ", ".join(omitted))
     excluded = set(contract.get("excluded_names") or [])
     entries: dict[tuple[str, str], dict[str, Any]] = {}
     for label, authority in authorities.items():
@@ -404,6 +407,35 @@ def build_backup_manifest(
     return manifest
 
 
+def undeclared_operational_writes(root: Path) -> list[str]:
+    """Declared durable write scopes must be restorable even before first use.
+
+    The capability catalogue is the write authority. Observing loader reads
+    misses handler-owned state such as goal decisions, and walking existing
+    files misses a new destination that has not been written yet.
+    """
+    contract = _load_contract(root)
+    declared = contract["roots"]["core"]
+    trees = [_safe_relative(value).as_posix() for value in declared["trees"]]
+    files = set(declared["files"])
+    catalogue = yaml.safe_load(
+        (root / "system/contracts/capabilities.yaml").read_text(encoding="utf-8"))
+    missing: set[str] = set()
+    for family in ("commands", "internal_commands", "domain_capabilities"):
+        for definition in catalogue.get(family, {}).values():
+            for scope in definition.get("writes", []):
+                if not scope.startswith("operations/"):
+                    continue
+                prefix = scope.split("*", 1)[0].rstrip("/")
+                # A glob must be wholly covered by a declared tree. An exact
+                # destination can additionally be covered by a declared file.
+                if "*" not in scope and prefix in files:
+                    continue
+                if not any(prefix == tree or prefix.startswith(tree + "/") for tree in trees):
+                    missing.add(scope)
+    return sorted(missing)
+
+
 def undeclared_canonical_inputs(root: Path) -> list[str]:
     """Canonical files the loader reads that the backup contract does not cover.
 
@@ -446,7 +478,7 @@ def undeclared_canonical_inputs(root: Path) -> list[str]:
     finally:
         yamlio.read_text_inside = original
 
-    undeclared = []
+    undeclared = undeclared_operational_writes(root)
     for relative in sorted(seen):
         if any(part in excluded for part in PurePosixPath(relative).parts):
             continue
@@ -455,7 +487,7 @@ def undeclared_canonical_inputs(root: Path) -> list[str]:
         if any(relative == tree or relative.startswith(tree + "/") for tree in trees):
             continue
         undeclared.append(relative)
-    return undeclared
+    return sorted(set(undeclared))
 
 
 def verify_backup_manifest(

@@ -12,7 +12,7 @@ VENV   := .venv
 # Homebrew "externally-managed-environment" errors on macOS.
 PY := $(shell [ -x $(VENV)/bin/python ] && echo $(VENV)/bin/python || echo $(PYTHON))
 
-.PHONY: help check warnings views materials inventory verify-materials contract test test-fast test-group test-affected test-paired bench lint code-check all setup setup-lean scrut hooks garden status plan-check system-check stress clean-derived commit-check
+.PHONY: help check warnings views materials inventory verify-materials contract test test-fast test-group test-affected test-paired bench lint code-check typecheck all setup setup-lean scrut hooks garden status plan-check system-check stress clean-derived commit-check
 
 help:
 	@echo "make check  - validate the repository (schemas + semantic rules)"
@@ -146,8 +146,12 @@ clean-derived:
 # hand: "is the pair I am about to rely on coherent?" It intentionally changes
 # no canonical data. The UI build is deterministic and its own check refuses a
 # stale contract mirror or hand-edited bundle.
+typecheck:
+	$(PY) -m mypy
+
 system-check:
 	$(MAKE) lint
+	$(MAKE) typecheck
 	$(PY) tools/validate.py --no-report
 	$(PY) tools/warning_baseline.py --check
 	@test -f ../obsidian-ui/package.json || { echo "system-check: sibling ../obsidian-ui is missing" >&2; exit 1; }

@@ -123,6 +123,45 @@ def test_locator_page_ranges_rejects_non_strings():
     assert parse_locator_page_ranges(None) == []
 
 
+def test_pdf_parser_and_extraction_errors_are_distinct_from_no_text(tmp_path, monkeypatch):
+    from learning_os.store.materials.pdf_text import PDFTextError, pdf_page_text, pdf_reader
+
+    with pytest.raises(PDFTextError, match="cannot be parsed"):
+        pdf_reader(b"not a PDF")
+    path = tmp_path / "book.pdf"
+    write_minimal_pdf(path, ["A genuine page with a text layer."])
+    reader = pdf_reader(path.read_bytes())
+    original_page = reader.pages[0]
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("synthetic extraction failure")
+
+    monkeypatch.setattr(type(original_page), "extract_text", broken)
+    with pytest.raises(PDFTextError, match="extraction failed"):
+        pdf_page_text(reader, 1)
+
+
+def test_pdf_slice_hashes_the_same_bytes_it_extracts(mini_repo, monkeypatch):
+    import hashlib
+
+    _add_sliced_unit(mini_repo, [_route("route-demo-snapshot", "book.pdf, PDF p. 1")],
+                     {"book.pdf": ["Original text observed by the admission reader."]})
+    path = mini_repo.parent / "materials/source-demo-book/book.pdf"
+    original = path.read_bytes()
+    real_reader = material_slices.pdf_reader
+
+    def replaced_after_open(content):
+        write_minimal_pdf(path, ["Replacement after the immutable snapshot was captured."])
+        return real_reader(content)
+
+    monkeypatch.setattr(material_slices, "pdf_reader", replaced_after_open)
+    part = material_slices._read_pdf_part("route-demo-snapshot", "material://source-demo-book/book.pdf",
+                                           path, "PDF p. 1")
+    assert "Original text" in part.text
+    assert part.file_sha256 == "sha256:" + hashlib.sha256(original).hexdigest()
+    assert part.file_sha256 != "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def test_resolver_is_centralized_single_multi_and_garbage(mini_repo):
     _add_sliced_unit(mini_repo, [_route("route-demo-a", "lecture-01.pdf")],
                      {"lecture-01.pdf": ["page one"]})

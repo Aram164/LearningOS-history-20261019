@@ -191,8 +191,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -261,9 +264,10 @@
       "result": {
         "error": {
           "exit": 2,
-          "first_line": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]",
-          "stderr": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]\n                [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json]\n                goal_id [goal_id ...]\nlos goal: error: the following arguments are required: goal_id\n"
-        }
+          "first_line": "usage: los goal [-h] (--reject | --defer | --close | --authorize)",
+          "stderr": "usage: los goal [-h] (--reject | --defer | --close | --authorize)\n                [--note NOTE] [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json] [--audit-file AUDIT_FILE]\n                goal_id [goal_id ...]\nlos goal: error: the following arguments are required: goal_id\n"
+        },
+        "stdout": ""
       }
     },
     {
@@ -702,8 +706,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -844,9 +851,10 @@
       "result": {
         "error": {
           "exit": 2,
-          "first_line": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]",
-          "stderr": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]\n                [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json]\n                goal_id [goal_id ...]\nlos goal: error: the following arguments are required: goal_id\n"
-        }
+          "first_line": "usage: los goal [-h] (--reject | --defer | --close | --authorize)",
+          "stderr": "usage: los goal [-h] (--reject | --defer | --close | --authorize)\n                [--note NOTE] [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json] [--audit-file AUDIT_FILE]\n                goal_id [goal_id ...]\nlos goal: error: the following arguments are required: goal_id\n"
+        },
+        "stdout": ""
       }
     },
     {
@@ -4487,8 +4495,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4534,8 +4545,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4578,8 +4592,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4625,8 +4642,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4672,8 +4692,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4720,8 +4743,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4766,8 +4792,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4813,8 +4842,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4862,8 +4894,11 @@
           "reviewed_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -4915,8 +4950,11 @@
           "reviewed_sha256": "sha256:2ebf1e0a838bd72ebf65539b9520a0ba5f4aaba3e6a8ca329048bb7fabf7b3f2",
           "session_id": "session-goal-batch",
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -11090,8 +11128,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -11158,8 +11199,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -11196,8 +11240,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -11234,8 +11281,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20256,8 +20306,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20294,8 +20347,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20333,8 +20389,11 @@
           "reviewed_sha256": "sha256:f26fef8d048e87641fc87bcb6bf62bf3bb7947ef379a92c107ea0303b23c7cc5",
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20368,8 +20427,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20403,8 +20465,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20440,8 +20505,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20477,8 +20545,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20514,8 +20585,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20549,8 +20623,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -20586,8 +20663,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -32137,8 +32217,10 @@
           "expected_snapshot": null,
           "expected_revision": [],
           "json": false,
+          "claim_evidence": null,
           "func": "learning_os.commands.material.cmd_route_patch"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39413,8 +39495,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39449,8 +39534,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39485,8 +39573,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39520,8 +39611,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39556,8 +39650,11 @@
           "reviewed_sha256": "sha256:abababababababababababababababababababababababababababababababab",
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39592,8 +39689,11 @@
           "reviewed_sha256": null,
           "session_id": "X",
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39613,9 +39713,10 @@
       "result": {
         "error": {
           "exit": 2,
-          "first_line": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]",
-          "stderr": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]\n                [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json]\n                goal_id [goal_id ...]\nlos goal: error: argument --defer: not allowed with argument --reject\n"
-        }
+          "first_line": "usage: los goal [-h] (--reject | --defer | --close | --authorize)",
+          "stderr": "usage: los goal [-h] (--reject | --defer | --close | --authorize)\n                [--note NOTE] [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json] [--audit-file AUDIT_FILE]\n                goal_id [goal_id ...]\nlos goal: error: argument --defer: not allowed with argument --reject\n"
+        },
+        "stdout": ""
       }
     },
     {
@@ -39635,9 +39736,10 @@
       "result": {
         "error": {
           "exit": 2,
-          "first_line": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]",
-          "stderr": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]\n                [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json]\n                goal_id [goal_id ...]\nlos goal: error: argument --close: not allowed with argument --reject\n"
-        }
+          "first_line": "usage: los goal [-h] (--reject | --defer | --close | --authorize)",
+          "stderr": "usage: los goal [-h] (--reject | --defer | --close | --authorize)\n                [--note NOTE] [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json] [--audit-file AUDIT_FILE]\n                goal_id [goal_id ...]\nlos goal: error: argument --close: not allowed with argument --reject\n"
+        },
+        "stdout": ""
       }
     },
     {
@@ -39657,9 +39759,10 @@
       "result": {
         "error": {
           "exit": 2,
-          "first_line": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]",
-          "stderr": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]\n                [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json]\n                goal_id [goal_id ...]\nlos goal: error: argument --close: not allowed with argument --defer\n"
-        }
+          "first_line": "usage: los goal [-h] (--reject | --defer | --close | --authorize)",
+          "stderr": "usage: los goal [-h] (--reject | --defer | --close | --authorize)\n                [--note NOTE] [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json] [--audit-file AUDIT_FILE]\n                goal_id [goal_id ...]\nlos goal: error: argument --close: not allowed with argument --defer\n"
+        },
+        "stdout": ""
       }
     },
     {
@@ -39693,8 +39796,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": true,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39729,8 +39835,11 @@
           "reviewed_sha256": null,
           "session_id": null,
           "json": false,
+          "authorize": false,
+          "audit_file": null,
           "func": "learning_os.commands.goal.cmd_goal"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -39750,9 +39859,10 @@
       "result": {
         "error": {
           "exit": 2,
-          "first_line": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]",
-          "stderr": "usage: los goal [-h] (--reject | --defer | --close) [--note NOTE]\n                [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json]\n                goal_id [goal_id ...]\nlos goal: error: unrecognized arguments: --bogus-flag-xyz\n"
-        }
+          "first_line": "usage: los goal [-h] (--reject | --defer | --close | --authorize)",
+          "stderr": "usage: los goal [-h] (--reject | --defer | --close | --authorize)\n                [--note NOTE] [--revisit-on REVISIT_ON] [--check]\n                [--reviewed-sha256 REVIEWED_SHA256] [--session-id SESSION_ID]\n                [--json] [--audit-file AUDIT_FILE]\n                goal_id [goal_id ...]\nlos goal: error: unrecognized arguments: --bogus-flag-xyz\n"
+        },
+        "stdout": ""
       }
     },
     {
@@ -49377,8 +49487,10 @@
           "expected_snapshot": null,
           "expected_revision": [],
           "json": false,
+          "claim_evidence": null,
           "func": "learning_os.commands.material.cmd_route_patch"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -49409,8 +49521,10 @@
           "expected_snapshot": null,
           "expected_revision": [],
           "json": false,
+          "claim_evidence": null,
           "func": "learning_os.commands.material.cmd_route_patch"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -49442,8 +49556,10 @@
           "expected_snapshot": "X",
           "expected_revision": [],
           "json": false,
+          "claim_evidence": null,
           "func": "learning_os.commands.material.cmd_route_patch"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -49477,8 +49593,10 @@
             "X"
           ],
           "json": false,
+          "claim_evidence": null,
           "func": "learning_os.commands.material.cmd_route_patch"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -49509,8 +49627,10 @@
           "expected_snapshot": null,
           "expected_revision": [],
           "json": true,
+          "claim_evidence": null,
           "func": "learning_os.commands.material.cmd_route_patch"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -49547,8 +49667,10 @@
             "X"
           ],
           "json": false,
+          "claim_evidence": null,
           "func": "learning_os.commands.material.cmd_route_patch"
-        }
+        },
+        "stdout": ""
       }
     },
     {
@@ -49571,8 +49693,9 @@
         "error": {
           "exit": 2,
           "first_line": "usage: los route-patch [-h] --changes CHANGES [--check]",
-          "stderr": "usage: los route-patch [-h] --changes CHANGES [--check]\n                       [--expected-snapshot EXPECTED_SNAPSHOT]\n                       [--expected-revision EXPECTED_REVISION] [--json]\n                       unit_id route_id\nlos route-patch: error: unrecognized arguments: --bogus-flag-xyz\n"
-        }
+          "stderr": "usage: los route-patch [-h] --changes CHANGES [--check]\n                       [--expected-snapshot EXPECTED_SNAPSHOT]\n                       [--expected-revision EXPECTED_REVISION] [--json]\n                       [--claim-evidence CLAIM_EVIDENCE]\n                       unit_id route_id\nlos route-patch: error: unrecognized arguments: --bogus-flag-xyz\n"
+        },
+        "stdout": ""
       }
     },
     {

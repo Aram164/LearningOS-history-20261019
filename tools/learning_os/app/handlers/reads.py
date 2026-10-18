@@ -23,7 +23,8 @@ from learning_os.derive.projection.learner_interpreter import (
 )
 from learning_os.derive.projection.projection.atlas import STAGE_CONCEPT
 from learning_os.derive.projection.session_compiler import compile_session, replan_session
-from learning_os.derive.semantics.goals import RankedCluster, goal_to_dict
+from learning_os.derive.semantics.claim_status import _read_yaml
+from learning_os.derive.semantics.goals import RankedCluster, detector_metrics, goal_to_dict
 from learning_os.derive.semantics.predicates import PREDICATES, evaluate
 from learning_os.derive.semantics.recipes import RecipeError, recipes_for
 from learning_os.derive.semantics.session_counts import FeedError, feed_scan_kwargs
@@ -622,6 +623,8 @@ def _brief_scan_page(req, goals, ranked) -> dict:
     ``full_result`` route to the complete scan; the full ``--json`` shape
     is untouched for consumers that need every goal.
     """
+    quiet_ids = {goal.goal_id for goal in goals if goal.quiet}
+    ranked = [row for row in ranked if not set(row.cluster.member_ids).issubset(quiet_ids)]
     shown = list(ranked[:BRIEF_GROUP_LIMIT])
     summaries = [_brief_group_summary(number, row)
                  for number, row in enumerate(shown, start=1)]
@@ -747,6 +750,8 @@ def intelligence_scan(ctx: OpContext, req: dict) -> Result:
         ) from exc
     if req.get("brief"):
         payload = _brief_scan_page(req, goals, ranked)
+        ledger = _read_yaml(root / "operations/goal-ledger.yaml")
+        payload["detectors"] = detector_metrics(ledger.get("decisions", {}) if isinstance(ledger, dict) else {})
     else:
         payload = {"goals": [goal_to_dict(goal) for goal in goals]}
     view = {

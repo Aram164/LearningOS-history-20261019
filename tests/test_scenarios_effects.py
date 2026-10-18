@@ -73,6 +73,10 @@ def test_scenario_effects(operation: str, case: dict, tmp_path: Path):
     recording_path = (scenario_harness.RECORDED_DIR / operation
                       / f"{case['id']}.json")
     if os.environ.get("LOS_RECORD_SCENARIOS") == "1":
+        if case.get("kind") == "success":
+            assert actual["exit"] == 0, f"refusing to record a failed success case: {operation}/{case['id']}: {actual['stderr']}"
+        elif case.get("kind") == "refusal":
+            assert actual["exit"] != 0, f"refusing to record a successful refusal case: {operation}/{case['id']}"
         recording_path.parent.mkdir(parents=True, exist_ok=True)
         recording_path.write_text(scenario_harness.pretty(actual),
                                   encoding="utf-8")
@@ -454,3 +458,24 @@ def test_request_rendering_round_trips():
     parsed = _subparser("goal").parse_args(argv)
     assert parsed.goal_id == request["goal_id"]
     assert parsed.reject is True
+
+
+def test_audit_startup_pins_this_checkout_before_importing_production(tmp_path):
+    """Shared editable environments must not turn candidate checks into baseline checks."""
+    import os
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    log = tmp_path / "provenance-audit.jsonl"
+    foreign = tmp_path / "foreign/learning_os"
+    foreign.mkdir(parents=True)
+    (foreign / "__init__.py").write_text("raise RuntimeError('foreign checkout imported')\n")
+    env = {**os.environ, "PYTHONPATH": str(root / "tests/arch_site") + os.pathsep + str(foreign.parent),
+           "LOS_ARCH_AUDIT_LOG": str(log), "LOS_ARCH_LAUNCH_TOKEN": "provenance"}
+    proc = subprocess.run([sys.executable, "-c",
+        "import json, learning_os.app._plan_gate as gate; print(json.dumps(gate.__file__))"],
+        cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert Path(json.loads(proc.stdout)).resolve() == (root / "tools/learning_os/app/_plan_gate.py").resolve()
+    witnesses = [json.loads(line) for line in log.read_text().splitlines()]
+    assert any(row.get("event") == "installed" for row in witnesses)
+    assert any(row.get("event") == "completed" and row.get("capture_ok") is True for row in witnesses)

@@ -19,8 +19,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
+from collections import defaultdict
+from pathlib import PurePosixPath
 from typing import Literal
 
+from learning_os.domain.route_identity import route_with_identity
+from learning_os.store.loading.yamlio import LoaderError, load_yaml
 from learning_os.store.materials.resolution import (
     material_uri_authority,
     resolve_route_material_files,
@@ -99,6 +104,42 @@ _ADDRESSED_FORMATS = {"course", "documentation", "website", "exam", "solutions",
 _EM_DASH_RE = re.compile(r"\s—\s")
 
 
+def _filename_present(name: str, locator: str) -> bool:
+    return bool(re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", locator))
+
+
+def locator_binding_findings(module_id: str, source_id: str, routes: list[dict],
+                              manifest_names: set[str]) -> list[tuple[str, str]]:
+    """Authoring constraints over declared identities; no material bytes are read."""
+    findings = []
+    groups = defaultdict(list)
+    names = {unicodedata.normalize("NFC", name).casefold() for name in manifest_names}
+    for route in routes:
+        vault = route.get("vault_path")
+        if isinstance(vault, str) and vault.startswith("material://"):
+            names.add(unicodedata.normalize("NFC", PurePosixPath(vault).name).casefold())
+    for route in routes:
+        locator = unicodedata.normalize("NFC", str(route.get("locator") or ""))
+        rid = route_with_identity(module_id, source_id, route)["id"]
+        if locator.strip():
+            groups[(str(route.get("unit_id") or ""), " ".join(locator.split()))].append(rid)
+        vault = route.get("vault_path")
+        if not isinstance(vault, str) or not vault.startswith("material://"):
+            continue
+        own = unicodedata.normalize("NFC", PurePosixPath(vault).name).casefold()
+        text = locator.casefold()
+        if own and not _filename_present(own, text):
+            others = sorted(name for name in names if name and name != own and _filename_present(name, text))
+            if others:
+                findings.append(("ROUTE-VAULT-LOCATOR-MISMATCH",
+                                 f"route {rid} binds {own!r} but its locator names {others!r} without its own file"))
+    for (unit, _), ids in sorted(groups.items()):
+        if len(ids) >= 2:
+            findings.append(("ROUTE-LOCATOR-DUPLICATE",
+                             f"source {source_id!r}, unit {unit!r}: distinct rich routes share one locator: {', '.join(sorted(ids))}"))
+    return findings
+
+
 def _looks_fused(locator: str) -> bool:
     """Sentence after the dash, and nothing addressable in it.
 
@@ -124,6 +165,16 @@ class ChecksPlanRigor:
     # ------------------------------------------------------------- routes
     def _check_route_rigor(self) -> None:
         r = self.repo
+        if not r.module_source_maps:
+            return
+        manifest_names: set[str] = set()
+        path = r.root / "records/materials-manifest.yaml"
+        if path.is_file():
+            try:
+                manifest = load_yaml(path, r.root)
+                manifest_names = {PurePosixPath(str(key)).name for key in (manifest.get("files") or {})}
+            except LoaderError:
+                pass  # MATERIALS-MANIFEST owns malformed inventory diagnostics.
         for mid, source_map in r.module_source_maps.items():
             module = r.modules.get(mid)
             if module is not None and module.get("status") == "archived":
@@ -134,7 +185,12 @@ class ChecksPlanRigor:
                 continue
             where = self._rel(r.module_source_map_origins[mid])
             for entry in source_map.get("sources", []) or []:
-                sid = entry.get("source_id") if isinstance(entry, dict) else None
+                if not isinstance(entry, dict):
+                    continue
+                sid = entry.get("source_id")
+                rich = [row for row in entry.get("unit_routes", []) or [] if isinstance(row, dict)]
+                for code, message in locator_binding_findings(mid, str(sid or ""), rich, manifest_names):
+                    self.err(code, message, where)
                 for route in entry.get("unit_routes", []) or []:
                     if not isinstance(route, dict):
                         continue

@@ -105,7 +105,7 @@ def _cluster_modules(repo, route_modules: dict[str, str],
             continue
         route = rest if kind == "covering-routes-stale" else None
         if route is None and rest.startswith("covers:"):
-            route = rest[len("covers:"):]
+            route = rest[len("covers:"):].split("@", 1)[0]
         if route and route in route_modules:
             modules.add(route_modules[route])
     return modules

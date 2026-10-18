@@ -19,6 +19,7 @@ from learning_os.derive.material_synthesis import (
     synthesis_destination,
     validate_unit_material_synthesis,
 )
+from learning_os.derive.semantics.claim_status import claim_impacts, observe_claims
 from learning_os.derive.validation import validate
 from learning_os.domain.plan_import import INVENTORY_ROW_DISPOSITIONS as _INVENTORY_ROW_DISPOSITIONS
 from learning_os.domain.plan_import import ack_shape_problems as _ack_shape_problems
@@ -28,6 +29,7 @@ from learning_os.domain.plan_import import (
     module_plan_routing_problems as _module_plan_routing_problems,
 )
 from learning_os.domain.plan_import import synthesis_entries as _synthesis_entries
+from learning_os.domain.route_identity import route_with_identity
 from learning_os.store.contracts import PLAN_TEMPLATE_VERSION, current_template_problems
 from learning_os.store.fingerprint import canonical_fingerprint
 from learning_os.store.loader import load_repo
@@ -850,11 +852,25 @@ def module_plan_check_report(root: Path, module_id: str, package: dict,
                 if not isinstance(source, dict):
                     continue
                 for route in source.get("unit_routes", []) or []:
-                    if isinstance(route, dict) and route.get("id"):
-                        out.setdefault(str(route["id"]), route)
+                    if isinstance(route, dict):
+                        identified = route_with_identity(module_id, str(source.get("source_id") or ""), route)
+                        out.setdefault(str(identified["id"]), identified)
             return out
 
         live_rows, staged_rows = rows(live_map), rows(staged_map)
+        changed_material_sources = {sid for sid, row in staged_repo.sources.items()
+                                    if row.get("material") != live_repo.sources.get(sid, {}).get("material")}
+        material_routes = {str(route_with_identity(module_id, str(source.get("source_id") or ""), row)["id"])
+                           for source in staged_map.get("sources", [])
+                           if source.get("source_id") in changed_material_sources
+                           for row in source.get("unit_routes", []) if isinstance(row, dict)}
+        touched_routes = {rid for rid, row in {**live_rows, **staged_rows}.items()
+                          if row.get("unit_id") in seen_units or live_rows.get(rid) != staged_rows.get(rid)} | material_routes
+        before_claims = observe_claims(root, repo=live_repo, route_ids=touched_routes)
+        after_claims = observe_claims(shadow, repo=staged_repo, route_ids=touched_routes & set(staged_rows))
+        rejudged = [row["claim_id"] for row in package.get("claim_evidence", []) or [] if isinstance(row, dict)]
+        claims = claim_impacts(before_claims, after_claims, rejudged)
+
         units: dict[str, dict] = {}
         for uid in sorted(seen_units):
             live_study = next((sm.data for sm in live_repo.study_maps.values()
@@ -926,6 +942,7 @@ def module_plan_check_report(root: Path, module_id: str, package: dict,
     live_sources = live_map.get("sources", []) or []
     staged_sources = staged_map.get("sources", []) or []
     return {
+        "claims": claims,
         "ok": True,
         "mode": "check",
         "module_id": module_id,

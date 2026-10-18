@@ -224,6 +224,48 @@
         "transport_only": true,
         "envelope_owned": false
       }
+    },
+    "authorize": {
+      "type": "boolean",
+      "description": "authorize intent to act on this occurrence; this is not evidence of completion",
+      "x-los-cli": {
+        "flags": [
+          "--authorize"
+        ],
+        "position": null,
+        "action": "store_true",
+        "nargs": 0,
+        "const": true,
+        "default": false,
+        "type": null,
+        "choices": null,
+        "metavar": null,
+        "required": false,
+        "stdin": false,
+        "transport_only": false,
+        "envelope_owned": false
+      }
+    },
+    "audit_file": {
+      "type": "string",
+      "description": "reviewed YAML authorization or closure for one exact frozen claim audit",
+      "x-los-cli": {
+        "flags": [
+          "--audit-file"
+        ],
+        "position": null,
+        "action": "store",
+        "nargs": null,
+        "const": null,
+        "default": null,
+        "type": null,
+        "choices": null,
+        "metavar": null,
+        "required": false,
+        "stdin": false,
+        "transport_only": false,
+        "envelope_owned": false
+      }
     }
   },
   "x-los-cli-command": {
@@ -237,7 +279,8 @@
         "dests": [
           "reject",
           "defer",
-          "close"
+          "close",
+          "authorize"
         ]
       }
     ],

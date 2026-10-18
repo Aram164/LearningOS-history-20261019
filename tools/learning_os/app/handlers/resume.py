@@ -22,6 +22,7 @@ from learning_os.derive.learning_runtime import (
 from learning_os.derive.projection.common import first_para as _first_para
 from learning_os.derive.projection.modules_view import academic_deadlines as _academic_deadlines
 from learning_os.derive.projection.resume_dossier import ResumeDossierError, build_resume_dossier
+from learning_os.derive.semantics.claim_status import claims_summary, observe_claims
 from learning_os.derive.semantics.dossiers import (
     DossierError,
     build_dossier,
@@ -218,6 +219,10 @@ def dossier(ctx: OpContext, req: dict) -> Result:
             "served_from_cache": served,
             "evidence_files": len(dict(fresh.content).get("evidence", {})),
         }
+        try:
+            payload["claims"] = claims_summary(observe_claims(root, repo=repo, route_ids=[r["id"] for r in routes]))
+        except ValueError as exc:
+            raise WriteRefused(f"cannot read claim status: {exc}") from exc
         if req.get("json"):
             payload["content"] = {
                 section: value for section, value in fresh.content}
@@ -640,7 +645,9 @@ def _top_cluster(root: Path) -> dict | None:
     try:
         from learning_os.app.ranking import ranked_scan
 
-        _, ranked, _ = ranked_scan(root, days=30)
+        goals, ranked, _ = ranked_scan(root, days=30)
+        quiet_ids = {goal.goal_id for goal in goals if goal.quiet}
+        ranked = [row for row in ranked if not set(row.cluster.member_ids).issubset(quiet_ids)]
     except (GitHistoryError, OSError, ValueError):
         return None
     if not ranked:

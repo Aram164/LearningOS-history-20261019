@@ -291,7 +291,8 @@
     "writes": [
      "curriculum/modules/*/source-map.yaml",
      "curriculum/modules/*/units/*/unit.yaml",
-     "curriculum/modules/*/units/*/study-map.yaml"
+     "curriculum/modules/*/units/*/study-map.yaml",
+     "operations/transactions/lineage.yaml"
     ]
    },
    "source.feedback.record": {
@@ -2758,6 +2759,32 @@
     "nargs": "+",
     "option_strings": [],
     "required": true,
+    "type": null
+   },
+   {
+    "action": "store",
+    "choices": null,
+    "default_repr": "None",
+    "dest": "audit_file",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--audit-file"
+    ],
+    "required": false,
+    "type": null
+   },
+   {
+    "action": "store_true",
+    "choices": null,
+    "default_repr": "False",
+    "dest": "authorize",
+    "metavar": null,
+    "nargs": 0,
+    "option_strings": [
+     "--authorize"
+    ],
+    "required": false,
     "type": null
    },
    {
@@ -6554,6 +6581,19 @@
     "type": null
    },
    {
+    "action": "store",
+    "choices": null,
+    "default_repr": "None",
+    "dest": "claim_evidence",
+    "metavar": null,
+    "nargs": null,
+    "option_strings": [
+     "--claim-evidence"
+    ],
+    "required": false,
+    "type": "json_object"
+   },
+   {
     "action": "append",
     "choices": null,
     "default_repr": "[]",
@@ -9112,7 +9152,7 @@
   "detour.resolve.schema.json": "b542ecf3965f7231ee01e8c2d1810a8aaaa5265c70fc99291d9865b192210fd5",
   "dossier.read.schema.json": "717b9d631fe689b747698ea6d9cb6eb67bf85beb6fa915d131141a00a34db0d5",
   "garden.seed.create.schema.json": "56ac1bac97ea847e27b591aa21ab802126ba482f2f403bf42c0d1c895d428238",
-  "goal.decide.schema.json": "75a7540bbfa50f3f70fc7aeda02732ced72040e34eda6102bd7267c51da5c0da",
+  "goal.decide.schema.json": "153d5ec6ea2358ec84af5df7cb2469c0fd7445bc4c62492f773fb753ee5df3f0",
   "health.report.schema.json": "eeb16526fc97b6560c2f32bd3fabce12b1b0a7e1e762c1a7f4b6b60e392b259e",
   "inbox.content.schema.json": "b956e7822531c67d13d4143b2c50cce2ff22e0e86bbbab5f63af18aaf4f998f4",
   "inbox.list.schema.json": "e7c01475bec27d2a5cd1e957a41b899a218c79ecb0e7099bb26c1f191ec8f55d",
@@ -9162,7 +9202,7 @@
   "resume.read.schema.json": "873cd342a30c7e35416eb7f62688de7a3c2df3e5848b000aa100a2cbfb97460e",
   "review.apply.schema.json": "756fa765f842b035c3818fe32f0132d7a1a7bf7708ed48459576046188cd61b1",
   "review.prepare.schema.json": "2981bf0a3879aeda9253b905b637abcc3b2fab631459e6d50ebdb8f538290fa4",
-  "route.patch.schema.json": "118048798ae18b22b94515564d9d2bc76d0c9c4103391ef10591101bbc4cc8c5",
+  "route.patch.schema.json": "04cf04b1b48c8132f8a61b63be2cd65c7338844438f4ef118d50e39131c4a19d",
   "runtime.session.schema.json": "3591ad91b76913f0160fbb054d24dc60f2d03e246b37c3a62b1cf55b2545af1f",
   "semantic.query.schema.json": "abd9beff1af58fe29e81fe58e7c7efb34ba3c8f42b72fe9c63991926e7a73034",
   "session.end.schema.json": "41356cfd7cc9b603c45f68e93483c6f5e3a6acea05d9065003e163c8f6f94077",

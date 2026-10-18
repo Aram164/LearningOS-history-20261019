@@ -50,7 +50,9 @@ cases:
   - goal-demo-rejected
   - --reject
   - --reviewed-sha256
-  - sha256:f26fef8d048e87641fc87bcb6bf62bf3bb7947ef379a92c107ea0303b23c7cc5
+  - sha256:2e15f0a78c81660e038aac856ead9f4b255d3a703e353f21a90eff1a24329348
+  - --note
+  - Explicit reviewed rejection.
   expect:
     site: null
 - id: bad-pattern
@@ -121,8 +123,39 @@ cases:
   - goal-demo-deferred
   - goal-demo-rejected
   - --reject
+  - --note
+  - Explicit reviewed rejection.
   expect:
     site: goal.decide.batch-needs-review
+- id: reject-needs-note
+  kind: refusal
+  transport: cli
+  argv:
+  - goal
+  - goal-demo-deferred
+  - --reject
+  - --check
+  expect:
+    site: goal.decide.reject-needs-note
+- id: audit-needs-reviewed-file
+  kind: refusal
+  transport: cli
+  argv:
+  - goal
+  - claims-audit:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - --authorize
+  - --check
+  expect:
+    site: goal.decide.invalid-audit
+- id: authorize-intent
+  kind: success
+  transport: cli
+  argv:
+  - goal
+  - study-map-obligation:unit-demo-l02
+  - --authorize
+  expect:
+    site: null
 untriggered:
 - where: tools/learning_os/app/handlers/goals.py:134
   reason: 'unreadable goal ledger: needs permissions no step can set'

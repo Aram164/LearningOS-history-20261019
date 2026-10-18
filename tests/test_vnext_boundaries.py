@@ -375,12 +375,12 @@ def test_multi_pass_dossier_publishes_exactly_one_synthesis(
     assert (unit_dir / "material-synthesis.yaml").is_file()
     assert [path.name for path in unit_dir.glob("material-synthesis*.yaml")] == [
         "material-synthesis.yaml"]
+    from learning_os.derive.semantics.claim_status import live_evidence_digest
     from learning_os.derive.semantics.lineage import (
         CONTRACT_VERSION,
         effective_statuses,
         load_ledger,
     )
-    from learning_os.derive.semantics.scan import live_evidence_digest
 
     records = load_ledger(mini_repo)
     claim = records[f"dossier:{synthesis['id']}"]
@@ -2011,6 +2011,32 @@ def test_a_canonical_input_the_contract_omits_is_named(mini_repo):
     ]
     contract_path.write_text(yaml.safe_dump(contract), encoding="utf-8")
     assert undeclared_canonical_inputs(mini_repo) == ["curriculum/thematic-groups.yaml"]
+
+
+def test_backup_carries_handler_owned_goals_even_before_first_write(mini_repo, tmp_path):
+    from learning_os.app.backup_manifest import undeclared_operational_writes
+
+    goal = mini_repo / "operations/goal-ledger.yaml"
+    assert not goal.exists()
+    assert undeclared_operational_writes(mini_repo) == []
+    contract_path = mini_repo / "system/contracts/backup-roots.yaml"
+    contract = yaml.safe_load(contract_path.read_text())
+    contract["roots"]["core"]["files"].remove("operations/goal-ledger.yaml")
+    contract_path.write_text(yaml.safe_dump(contract))
+    assert undeclared_operational_writes(mini_repo) == ["operations/goal-ledger.yaml"]
+    contract["roots"]["core"]["files"].append("operations/goal-ledger.yaml")
+    contract_path.write_text(yaml.safe_dump(contract))
+    # Stored audit/decision bytes must survive the ordinary inventory exactly.
+    goal.parent.mkdir(exist_ok=True)
+    goal.write_bytes(b"schema_version: 1\nentries: {}\n")
+    ui = tmp_path / "ui"
+    _ui_fixture(ui, mini_repo)
+    materials = tmp_path / "materials"
+    materials.mkdir()
+    manifest = build_backup_manifest(mini_repo, ui_root=ui, materials_root=materials)
+    row = next(row for row in manifest["entries"]
+               if row["root"] == "core" and row["path"] == "operations/goal-ledger.yaml")
+    assert row["sha256"] == "sha256:" + hashlib.sha256(goal.read_bytes()).hexdigest()
 
 
 def test_quarantined_workspaces_stay_out_of_the_inventory(mini_repo, tmp_path):

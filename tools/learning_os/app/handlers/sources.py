@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from learning_os.app.claim_admission import lineage_artifacts
 from learning_os.app.context import OpContext
 from learning_os.app.encoders import dumps_indented
 from learning_os.app.handlers._shared import input_record as _input_record
@@ -1307,14 +1308,14 @@ def _plan_source_record_revise(root: Path, repo, item: Any) -> dict:
     writes = {destination: _dump_yaml({"sources": merged})}
     writes.update(dossier_writes)
     unit_ids = sorted(set(replacements) | set(rebased))
-    revisions = {sid: artifact_revision(root, sid)}
-    revisions.update({uid: artifact_revision(root, uid) for uid in unit_ids})
+    artifacts = lineage_artifacts([sid, *unit_ids], bool(dossier_publications))
+    revisions = {artifact: artifact_revision(root, artifact) for artifact in artifacts}
     return {
         "diff": diff,
         "diff_sha256": "sha256:" + hashlib.sha256(canonical).hexdigest(),
         "writes": writes,
         "dossier_publications": dossier_publications,
-        "artifact_ids": [sid] + unit_ids,
+        "artifact_ids": artifacts,
         "expected_revisions": revisions,
     }
 

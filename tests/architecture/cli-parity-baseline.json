@@ -1108,7 +1108,8 @@
           "dests": [
             "reject",
             "defer",
-            "close"
+            "close",
+            "authorize"
           ]
         }
       ],
@@ -1276,6 +1277,36 @@
           "help": "no-op: this command always prints JSON",
           "metavar": null,
           "action": "store_true"
+        },
+        {
+          "option_strings": [
+            "--authorize"
+          ],
+          "dest": "authorize",
+          "nargs": 0,
+          "const_repr": "True",
+          "default_repr": "False",
+          "type": null,
+          "choices": null,
+          "required": false,
+          "help": "authorize intent to act on this occurrence; this is not evidence of completion",
+          "metavar": null,
+          "action": "store_true"
+        },
+        {
+          "option_strings": [
+            "--audit-file"
+          ],
+          "dest": "audit_file",
+          "nargs": null,
+          "const_repr": "None",
+          "default_repr": "None",
+          "type": null,
+          "choices": null,
+          "required": false,
+          "help": "reviewed YAML authorization or closure for one exact frozen claim audit",
+          "metavar": null,
+          "action": "store"
         }
       ]
     },
@@ -5522,6 +5553,21 @@
           "help": "no-op: this command always prints JSON",
           "metavar": null,
           "action": "store_true"
+        },
+        {
+          "option_strings": [
+            "--claim-evidence"
+          ],
+          "dest": "claim_evidence",
+          "nargs": null,
+          "const_repr": "None",
+          "default_repr": "None",
+          "type": "json_object",
+          "choices": null,
+          "required": false,
+          "help": "One reviewed covers claim for this exact route: claim_id, evidence and optional read revisions. Required for covered material-identity changes; local readable material needs a quote at an explicit page/window.",
+          "metavar": null,
+          "action": "store"
         }
       ]
     },

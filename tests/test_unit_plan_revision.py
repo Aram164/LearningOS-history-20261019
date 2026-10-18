@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 from repo_builders import (
+    SLICED_LECTURE_TEXT,
     _audit,
     _compact_revision,
     _compact_setup,
@@ -175,7 +176,8 @@ def test_compact_preflight_emits_post_change_basis(mini_repo: Path, tmp_path: Pa
                                    "fields": {"covers": covers}}]},
         material_synthesis=good,
         claim_evidence=[{"claim_id": "covers:route-demo-book",
-                         "evidence": [{"kind": "route-locator", "ref": "lecture-01.pdf"}]}],
+                         "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf",
+                               "page": 1, "text": SLICED_LECTURE_TEXT}]}],
     )
     path = tmp_path / "staged-basis.yaml"
     write_yaml(path, revision)
@@ -326,12 +328,12 @@ def test_route_change_with_replacement_applies_atomically(mini_repo, tmp_path):
 
     from gateway_helpers import approved_v2_call, file_sha256
 
+    from learning_os.derive.semantics.claim_status import live_evidence_digest
     from learning_os.derive.semantics.lineage import (
         CONTRACT_VERSION,
         effective_statuses,
         load_ledger,
     )
-    from learning_os.derive.semantics.scan import live_evidence_digest
 
     assert not (mini_repo / "operations/transactions/lineage.yaml").exists()
     applied = approved_v2_call(
@@ -405,7 +407,8 @@ def test_missing_dossier_does_not_require_replacement_for_route_addition(
         {"source_id": "source-demo-book", "route": route},
     ]}, claim_evidence=[{
         "claim_id": "covers:route-demo-new",
-        "evidence": [{"kind": "route-locator", "ref": "lecture-01.pdf"}],
+        "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf",
+                               "page": 1, "text": SLICED_LECTURE_TEXT}],
     }])
     path = tmp_path / "add-without-dossier.yaml"
     write_yaml(path, revision)
@@ -565,10 +568,14 @@ def test_verify_plan_receipt_checks_projection(mini_repo, tmp_path):
     assert verify.returncode == 0, verify.stderr
 
 
+def _acceptance_locator(rid):
+    return "lecture-01.pdf" if rid == "route-demo-book" else f"lecture-01.pdf, PDF p. 1, {rid} worked example"
+
+
 def _live_study_map() -> dict:
     def resource(rid, triage):
         return {"kind": "read", "label": f"Resource {rid}",
-                "source_id": "source-demo-book", "locator": "lecture-01.pdf",
+                "source_id": "source-demo-book", "locator": _acceptance_locator(rid),
                 "route_id": rid, "scope_triage": triage}
 
     def stage(sid, number, title, resources):
@@ -601,8 +608,8 @@ def _acceptance_setup(mini_repo: Path):
 
     _sliced_unit(mini_repo, [
         _sliced_route("route-demo-book", "lecture-01.pdf"),
-        _sliced_route("route-demo-old", "lecture-01.pdf"),
-        _sliced_route("route-demo-sup", "lecture-01.pdf", scope="complementary"),
+        _sliced_route("route-demo-old", _acceptance_locator("route-demo-old")),
+        _sliced_route("route-demo-sup", _acceptance_locator("route-demo-sup"), scope="complementary"),
     ])
     unit_path = mini_repo / "curriculum/modules/module-demo/units/unit-demo-l01/unit.yaml"
     unit = yaml.safe_load(unit_path.read_text(encoding="utf-8"))
@@ -634,7 +641,7 @@ def _acceptance_setup(mini_repo: Path):
             row = {k: row[k] for k in ("route_id", "source_id", "locator",
                                        "review_status", "concept_ids")}
             row["reason"] = "Complementary background; screened, not deeply reviewed."
-        row.update(route_id=rid, review_status=status,
+        row.update(route_id=rid, locator=_acceptance_locator(rid), review_status=status,
                    evidence=[{"locator": "lecture-01.pdf p.1",
                               "checksum": basis["material_checksums"][rid]}])
         assessments.append(row)
@@ -659,7 +666,7 @@ def test_acceptance_one_lecture_revision_end_to_end(mini_repo, tmp_path):
     from learning_os.derive.material_synthesis import current_unit_material_basis
 
     _acceptance_setup(mini_repo)
-    new_route = _sliced_route("route-demo-new", "lecture-01.pdf")
+    new_route = _sliced_route("route-demo-new", _acceptance_locator("route-demo-new"))
     revision = _compact_revision(
         mini_repo,
         route_changes={
@@ -675,9 +682,11 @@ def test_acceptance_one_lecture_revision_end_to_end(mini_repo, tmp_path):
         }],
         claim_evidence=[
             {"claim_id": "covers:route-demo-old",
-             "evidence": [{"kind": "route-locator", "ref": "lecture-01.pdf"}]},
+             "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf",
+                               "page": 1, "text": SLICED_LECTURE_TEXT}]},
             {"claim_id": "covers:route-demo-new",
-             "evidence": [{"kind": "route-locator", "ref": "lecture-01.pdf"}]},
+             "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf",
+                               "page": 1, "text": SLICED_LECTURE_TEXT}]},
         ],
     )
     final_map = _live_study_map()
@@ -686,7 +695,7 @@ def test_acceptance_one_lecture_revision_end_to_end(mini_repo, tmp_path):
                           if r["route_id"] != "route-demo-old"]
     intro["resources"].append({"kind": "read", "label": "Resource route-demo-new",
                                "source_id": "source-demo-book",
-                               "locator": "lecture-01.pdf",
+                               "locator": new_route["locator"],
                                "route_id": "route-demo-new",
                                "scope_triage": "required-now"})
     revision["study_map"] = final_map
@@ -717,7 +726,7 @@ def test_acceptance_one_lecture_revision_end_to_end(mini_repo, tmp_path):
             if a["route_id"] != "route-demo-old"]
     new_assessment = copy.deepcopy(kept[0])
     new_assessment.update(
-        route_id="route-demo-new", review_status="deep-reviewed",
+        route_id="route-demo-new", locator=new_route["locator"], review_status="deep-reviewed",
         evidence=[{"locator": "lecture-01.pdf p.1",
                    "checksum": changed_basis["material_checksums"]["route-demo-new"]}])
     replacement["route_assessments"] = kept + [new_assessment]
@@ -828,6 +837,94 @@ def _reviewed_fixture(mini_repo, tmp_path, *, structural=False):
                   "--apply-reviewed-sha256", report["reviewed_file_sha256"],
                   "--review-report", str(report_file))
     return report, report_file, revision_file, apply_args
+
+
+def _ledger_only_fixture(mini_repo, tmp_path):
+    from repo_builders import run_los, write_yaml
+
+    from learning_os.derive.semantics.lineage import dump_ledger, emit_route_covers
+
+    _compact_setup(mini_repo)
+    prior = emit_route_covers(
+        route_id="route-demo-book", covers=["knowledge-demo-expectation"], read_revisions={},
+        judged_by="prior-review", admitted_by={"request_id": "prior", "idempotency_key": "prior"},
+        source_hashes={"route-content:route-demo-book": "sha256:" + "0" * 64})
+    ledger = mini_repo / "operations/transactions/lineage.yaml"
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    ledger.write_text(dump_ledger({prior.claim_id: prior}))
+    revision = _compact_revision(mini_repo, claim_evidence=[{
+        "claim_id": prior.claim_id,
+        "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf",
+                      "text": SLICED_LECTURE_TEXT, "page": 1}]}])
+    draft = tmp_path / "rejudge.yaml"
+    write_yaml(draft, revision)
+    checked = run_los(mini_repo, "unit-plan-revise", "unit-demo-l01", "--file", str(draft), "--check")
+    assert checked.returncode == 0, checked.stderr
+    report_file = tmp_path / "rejudge-check.json"
+    report_file.write_text(checked.stdout)
+    report = json.loads(checked.stdout)
+    args = ("unit-plan-revise", "unit-demo-l01", "--file", str(draft),
+            "--review-report", str(report_file), "--apply-reviewed-sha256", report["reviewed_file_sha256"])
+    return report, report_file, args
+
+
+def test_ledger_only_rejudgment_preserves_authored_bytes_and_verifies_receipt(mini_repo, tmp_path):
+    import subprocess
+    import sys
+
+    from repo_builders import run_los
+
+    from learning_os.derive.semantics.lineage import load_ledger
+    from learning_os.store.revisions import load_revisions
+
+    report, report_file, args = _ledger_only_fixture(mini_repo, tmp_path)
+    assert report["expected_write_paths"] == ["operations/transactions/lineage.yaml"]
+    assert report["commit_artifact_ids"] == ["file:operations/transactions/lineage.yaml"]
+    assert report["expected_write_sha256"] == {}
+    authored = {path: path.read_bytes() for path in (mini_repo / "curriculum/modules/module-demo").rglob("*") if path.is_file()}
+    before_revisions = load_revisions(mini_repo)
+    applied = run_los(mini_repo, *args)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    response = json.loads(applied.stdout)
+    assert {path: path.read_bytes() for path in authored} == authored
+    revisions = load_revisions(mini_repo)
+    assert revisions == {**before_revisions, "file:operations/transactions/lineage.yaml": 1}
+    record = load_ledger(mini_repo)["covers:route-demo-book"]
+    assert record.supersedes is not None
+    # Excerpts appear in the outside review file, never in committed effects.
+    receipt = yaml.safe_load((mini_repo / response["receipt_path"]).read_text())
+    for row in receipt["writes"]:
+        assert SLICED_LECTURE_TEXT.encode() not in (mini_repo / row["path"]).read_bytes()
+    replay = run_los(mini_repo, *args)
+    assert replay.returncode == 0, replay.stdout + replay.stderr
+    assert json.loads(replay.stdout)["replayed"] is True
+    generated = subprocess.run([sys.executable, str(REPO_ROOT / "tools/generate.py"), "--root", str(mini_repo)],
+                               capture_output=True, text=True)
+    assert generated.returncode == 0, generated.stderr
+    verified = subprocess.run([sys.executable, str(REPO_ROOT / "tools/verify_plan_receipt.py"),
+                               "--root", str(mini_repo), "--unit", "unit-demo-l01", "--report", str(report_file)],
+                              capture_output=True, text=True)
+    assert verified.returncode == 0, verified.stdout + verified.stderr
+
+
+@pytest.mark.parametrize("capability", ["route.patch", "module.plan.import", "unit.plan.revise", "source.record.revise",
+                                        "unit.material-synthesis.publish", "lineage.restamp"])
+def test_reviewed_ledger_only_repair_refuses_each_interposed_lineage_writer(mini_repo, tmp_path, capability):
+    from repo_builders import run_los
+
+    from learning_os.store.transactions import TransactionService, artifact_revision
+
+    _, _, args = _ledger_only_fixture(mini_repo, tmp_path)
+    path = mini_repo / "operations/transactions/lineage.yaml"
+    # Exercise the shared artifact using each existing writer's actual grant.
+    TransactionService(mini_repo).commit(capability=capability,
+        writes={path: path.read_bytes()}, artifact_ids=["file:operations/transactions/lineage.yaml"])
+    before = path.read_bytes()
+    refused = run_los(mini_repo, *args)
+    assert refused.returncode != 0
+    assert "REVISION_CONFLICT" in refused.stdout + refused.stderr
+    assert path.read_bytes() == before
+    assert artifact_revision(mini_repo, "file:operations/transactions/lineage.yaml") == 1
 
 
 @pytest.mark.parametrize("structural", [False, True])
@@ -1088,7 +1185,8 @@ def test_route_only_coverage_revision_pins_route_and_nodes_not_owners(mini_repo,
         route_changes={"update": [{"route_id": "route-demo-book", "fields": {"covers": covers}}]},
         material_synthesis=dossier,
         claim_evidence=[{"claim_id": "covers:route-demo-book",
-                         "evidence": [{"kind": "route-locator", "ref": "lecture-01.pdf"}]}])
+                         "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf",
+                               "page": 1, "text": SLICED_LECTURE_TEXT}]}])
     file = tmp_path / "coverage.yaml"
     write_yaml(file, revision)
     checked = run_los(mini_repo, "unit-plan-revise", "unit-demo-l01", "--file", str(file), "--check")
@@ -1115,8 +1213,8 @@ def test_route_only_coverage_revision_pins_route_and_nodes_not_owners(mini_repo,
     assert "node-content:knowledge-demo-outcomes" in hashes
     records = load_ledger(mini_repo)
     assert f"dossier:{dossier['id']}" in records
+    from learning_os.derive.semantics.claim_status import live_evidence_digest
     from learning_os.derive.semantics.lineage import CONTRACT_VERSION, effective_statuses
-    from learning_os.derive.semantics.scan import live_evidence_digest
 
     dossier_claim = records[f"dossier:{dossier['id']}"]
     hashes = {key: live_evidence_digest(mini_repo, key, {})

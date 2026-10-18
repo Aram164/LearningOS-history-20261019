@@ -672,6 +672,20 @@ that `plan_sha256`, snapshot and exact revision guards. Conversion must
 reconstruct every effective map exactly; ambiguous or independent materials
 remain inline. It does not replace the material-coverage audit for new plans.
 
+The focused route response carries a sibling `claim` status; full unit context
+has a route-keyed `claims` map and the brief has bounded counts/actionable rows.
+Stage-focused reads do not read claims. Dossier status is live metadata outside
+its cached content. Preflight `claims` impact is advisory: it names stale claims
+and the next rejudgment command without adding an acknowledgment gate.
+
+Changes to coverage or locator/vault/URL/source-material identity require
+per-claim evidence, including `route-patch --claim-evidence JSON`. Keep
+quotation-bearing drafts outside Core. Use exact material URIs and explicit PDF
+pages or transcript windows; a local claim cannot be downgraded to remote by
+removing its binding. Unchanged stale/contested/audit-defective claims may carry
+fresh evidence through `unit-plan-revise` without fabricating a content edit.
+Fresh unchanged and unrecorded unchanged claims retain the backfill refusal.
+
 For structural plan revisions, use the creation/import path:
 
 Procedure: [transcript](procedures/revise-an-existing-plan.md).
@@ -888,7 +902,7 @@ state; it grants no ability, evidence credit, or mastery.
 
 Procedure: [transcript](procedures/review-exact-goal-decisions-together.md).
 
-`los goal ID --reject|--defer|--close` remains the single-decision sidecar path.
+`los goal ID --authorize|--reject|--defer|--close` remains the single-decision sidecar path.
 For several explicit IDs, pass each ID as its own argument and add `--check`.
 The preview lists every before/after decision and its `reviewed_sha256`.
 Apply those same arguments with `--reviewed-sha256` after Aram approves them.
@@ -903,6 +917,27 @@ goals. `--revisit-on` remains a future date used only with `--defer`; no
 batch runs automatically. The decision joins the caller's session ledger —
 `session-end` lists and commits it — resolved as explicit `--session-id`,
 then `LOS_SESSION_ID`, then the channel.
+
+Authorization records intent and leaves the finding visible; reject needs a
+nonempty `--note`. For an audit, prepare the authorization YAML outside Core:
+`pool` is the complete currently eligible sorted list of `{claim_id, basis}`
+pairs; `pool_sha256` is its full digest; `seed` is 64 lowercase hex digits from
+system randomness; `algorithm` is `python-mt19937-shuffle-v1`; `sample` is the
+30 pairs returned by the recorded seeded shuffle. The pure reference helpers
+are in `tools/learning_os/derive/semantics/claim_audits.py`.
+
+Run `goal AUDIT_ID --authorize --audit-file FILE --check`, review the exact
+pool/seed/sample and returned hash, then apply those same arguments with
+`--reviewed-sha256`. Audit apply requires that hash even for one ID. Never draw
+again because a sample is inconvenient. Assign a reviewer from a different
+judging session. Overclaim means a covered node is not taught at the locator;
+underclaim is not an audit defect. The reviewer records the actual reviewed
+sample, defects, reviewer identity, report path and full report digest in a
+closure file, then uses `--close --audit-file FILE --check` and the same reviewed
+apply procedure. Preserve report bytes for provenance. Reject/defer decisions
+do not erase authorization, results or defects. Historical closure uses the
+frozen basis pairs, not the current population. Repair each defective claim
+through the admitted plan path; only changed bases can produce the next pool.
 
 ## 31. Back up and restore
 

@@ -80,3 +80,8 @@ route_changes:
 #   - kind: demotion
 #     target: route-example-l04-deck
 #     reason: "Superseded by the new derivation; the tutorial keeps the drill."
+
+# claim_evidence also admits unchanged stale, contested or exact-basis audit-defective
+# claims. For local material use kind: quote with canonical ref, explicit page or
+# window and 40-300-character text; keep quotation-bearing drafts outside Core.
+# Coverage or material-identity changes require evidence even when covers stays equal.

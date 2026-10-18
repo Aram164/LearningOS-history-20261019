@@ -8,7 +8,7 @@ bytes on disk with a checksum in `records/materials-manifest.yaml`; every video
 resolved to a name and sometimes a URL. Measured 2026-09-11: 63 video/course
 sources, none with a `material:`, 43 plan rows pointing at them, *zero* with a
 timestamp in the locator. So an agent asked to check a claim against a lecture
-had nothing to read, and `source-changed-under-claim` could not fire for video
+had nothing to read, and `lineage-stale` could not fire for video
 at all — there was no hash to change.
 
 A transcript here is an ordinary managed material. Once it is one, everything

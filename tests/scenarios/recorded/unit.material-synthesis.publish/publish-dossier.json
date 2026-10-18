@@ -9,10 +9,11 @@
         "KEY2": {
           "capability": "unit.material-synthesis.publish",
           "channel": "operator",
-          "intent_sha256": "sha256:f66779b9a7c262e73967ba25c215ef5e84a1265b60fb821778ae2d036a88d5eb",
+          "intent_sha256": "sha256:ba70a1c26812d66bd19e47b7417fb71e6bf70233cb86c573eedeb5c18378a446",
           "receipt_path": "operations/transactions/TX1.yaml",
           "request_id": "KEY1",
           "revisions": {
+            "file:operations/transactions/lineage.yaml": 1,
             "material-synthesis-demo-l01": 1,
             "unit-demo-l01": 4
           },
@@ -30,6 +31,10 @@
   "receipts": [
     {
       "artifact_revisions": {
+        "file:operations/transactions/lineage.yaml": {
+          "after": 1,
+          "before": 0
+        },
         "material-synthesis-demo-l01": {
           "after": 1,
           "before": 0
@@ -55,6 +60,7 @@
       "capability": "unit.material-synthesis.publish",
       "committed_at": "2026-10-01T09:00:00+02:00",
       "expected_revisions": {
+        "file:operations/transactions/lineage.yaml": 0,
         "material-synthesis-demo-l01": 0,
         "unit-demo-l01": 3
       },
@@ -66,11 +72,11 @@
       "request": {
         "approval": {
           "kind": "operator-approval",
-          "subject_sha256": "sha256:f66779b9a7c262e73967ba25c215ef5e84a1265b60fb821778ae2d036a88d5eb"
+          "subject_sha256": "sha256:ba70a1c26812d66bd19e47b7417fb71e6bf70233cb86c573eedeb5c18378a446"
         },
         "channel": "operator",
         "idempotency_key": "KEY2",
-        "intent_sha256": "sha256:f66779b9a7c262e73967ba25c215ef5e84a1265b60fb821778ae2d036a88d5eb",
+        "intent_sha256": "sha256:ba70a1c26812d66bd19e47b7417fb71e6bf70233cb86c573eedeb5c18378a446",
         "request_id": "KEY1"
       },
       "schema_version": 2,
@@ -97,6 +103,7 @@
   "revisions_changed": {
     "after": {
       "revisions": {
+        "file:operations/transactions/lineage.yaml": 1,
         "material-synthesis-demo-l01": 1,
         "unit-demo-l01": 4
       },
@@ -124,13 +131,13 @@
         "operations/transactions/TX1.yaml": {
           "channel": "operator",
           "recorded_at": "2026-10-01T07:00:00+00:00",
-          "sha256": "d7d1ee0b64fe83b8d7d11256fadce0427e8d2bbe0c56f3db5444d4c2b1ce13f3",
+          "sha256": "9778001d77ef7595dbfd500a5e7bd3eedfb6383e29d99200517b12d1a31d9ee5",
           "state": "file"
         },
         "operations/transactions/idempotency.yaml": {
           "channel": "operator",
           "recorded_at": "2026-10-01T07:00:00+00:00",
-          "sha256": "7831393ed9dcc492035c5513131d788571d8d7b06478d209279034e4a06269a3",
+          "sha256": "d35cc7e0fe373ee6d4fb09b4fe3ddc2034ac0c0acfbc9e08b0cc8120dd98c575",
           "state": "file"
         },
         "operations/transactions/lineage.yaml": {
@@ -142,7 +149,7 @@
         "operations/transactions/revisions.yaml": {
           "channel": "operator",
           "recorded_at": "2026-10-01T07:00:00+00:00",
-          "sha256": "d762b913519502f5e09e8c390e02eddc341ca97ac3b2e0499546b9d32f8f6038",
+          "sha256": "f426454d21a1310155f333b6f5c7c01df06c7e98efd406b4bd8ae8777e57a56b",
           "state": "file"
         }
       },
@@ -155,7 +162,7 @@
     "before": null
   },
   "stderr": "",
-  "stdout": "{\n  \"schema_version\": 2,\n  \"request_id\": \"KEY1\",\n  \"idempotency_key\": \"KEY2\",\n  \"capability\": \"unit.material-synthesis.publish\",\n  \"ok\": true,\n  \"replayed\": false,\n  \"transaction_id\": \"TX1\",\n  \"receipt_path\": \"operations/transactions/TX1.yaml\",\n  \"snapshot_after\": \"SNAP1\",\n  \"result\": {\n    \"ok\": true,\n    \"transaction_id\": \"TX1\",\n    \"receipt_path\": \"operations/transactions/TX1.yaml\",\n    \"artifact_revisions\": {\n      \"material-synthesis-demo-l01\": 1,\n      \"unit-demo-l01\": 4\n    },\n    \"snapshot_after\": \"SNAP1\",\n    \"replayed\": false\n  },\n  \"error\": null\n}\n",
+  "stdout": "{\n  \"schema_version\": 2,\n  \"request_id\": \"KEY1\",\n  \"idempotency_key\": \"KEY2\",\n  \"capability\": \"unit.material-synthesis.publish\",\n  \"ok\": true,\n  \"replayed\": false,\n  \"transaction_id\": \"TX1\",\n  \"receipt_path\": \"operations/transactions/TX1.yaml\",\n  \"snapshot_after\": \"SNAP1\",\n  \"result\": {\n    \"ok\": true,\n    \"transaction_id\": \"TX1\",\n    \"receipt_path\": \"operations/transactions/TX1.yaml\",\n    \"artifact_revisions\": {\n      \"file:operations/transactions/lineage.yaml\": 1,\n      \"material-synthesis-demo-l01\": 1,\n      \"unit-demo-l01\": 4\n    },\n    \"snapshot_after\": \"SNAP1\",\n    \"replayed\": false\n  },\n  \"error\": null\n}\n",
   "stdout_json": {
     "capability": "unit.material-synthesis.publish",
     "error": null,
@@ -166,6 +173,7 @@
     "request_id": "KEY1",
     "result": {
       "artifact_revisions": {
+        "file:operations/transactions/lineage.yaml": 1,
         "material-synthesis-demo-l01": 1,
         "unit-demo-l01": 4
       },

@@ -10,7 +10,7 @@
         "KEY2": {
           "capability": "route.patch",
           "channel": "operator",
-          "intent_sha256": "sha256:3d251bedb8b92c78083e89e39e7330f636d14099fa3e37b08e3182d80bc2cf42",
+          "intent_sha256": "sha256:f9e5b33b36e9a3a7e1877d2f191f5e37b938c2b2d78e50b3345833cc4740d7e6",
           "receipt_path": "operations/transactions/TX1.yaml",
           "request_id": "KEY1",
           "revisions": {
@@ -54,7 +54,8 @@
             "declared_writes": [
               "curriculum/modules/*/source-map.yaml",
               "curriculum/modules/*/units/*/unit.yaml",
-              "curriculum/modules/*/units/*/study-map.yaml"
+              "curriculum/modules/*/units/*/study-map.yaml",
+              "operations/transactions/lineage.yaml"
             ]
           }
         ]
@@ -74,11 +75,11 @@
       "request": {
         "approval": {
           "kind": "operator-approval",
-          "subject_sha256": "sha256:3d251bedb8b92c78083e89e39e7330f636d14099fa3e37b08e3182d80bc2cf42"
+          "subject_sha256": "sha256:f9e5b33b36e9a3a7e1877d2f191f5e37b938c2b2d78e50b3345833cc4740d7e6"
         },
         "channel": "operator",
         "idempotency_key": "KEY2",
-        "intent_sha256": "sha256:3d251bedb8b92c78083e89e39e7330f636d14099fa3e37b08e3182d80bc2cf42",
+        "intent_sha256": "sha256:f9e5b33b36e9a3a7e1877d2f191f5e37b938c2b2d78e50b3345833cc4740d7e6",
         "request_id": "KEY1"
       },
       "schema_version": 2,
@@ -139,13 +140,13 @@
         "operations/transactions/TX1.yaml": {
           "channel": "operator",
           "recorded_at": "2026-10-01T07:00:00+00:00",
-          "sha256": "61ae2d69f4c411599e85ceea58bc59d9d873c3ae788a89e4d646ea8c796c737f",
+          "sha256": "9174f5f9824a6cf92ca7e926e1555d0adf99983934946188f29f038e3214412c",
           "state": "file"
         },
         "operations/transactions/idempotency.yaml": {
           "channel": "operator",
           "recorded_at": "2026-10-01T07:00:00+00:00",
-          "sha256": "bdbae7bd81a6535af54d0d2ee94d0ca7340873e629ec27334fd78d8f9e0f8107",
+          "sha256": "0add2eb7f2e459ea1172e073de5838471c02c13978112a6f19a2b22916e6ec37",
           "state": "file"
         },
         "operations/transactions/revisions.yaml": {
@@ -164,7 +165,7 @@
     "before": null
   },
   "stderr": "",
-  "stdout": "{\n  \"schema_version\": 2,\n  \"request_id\": \"KEY1\",\n  \"idempotency_key\": \"KEY2\",\n  \"capability\": \"route.patch\",\n  \"ok\": true,\n  \"replayed\": false,\n  \"transaction_id\": \"TX1\",\n  \"receipt_path\": \"operations/transactions/TX1.yaml\",\n  \"snapshot_after\": \"SNAP1\",\n  \"result\": {\n    \"schema_version\": 1,\n    \"unit_id\": \"unit-demo-l01\",\n    \"route_id\": \"route-b2f1f80014860a929a3af0bc\",\n    \"changes\": {\n      \"angle\": {\n        \"before\": \"Derives the weighted sum and works a discrete example.\",\n        \"after\": \"Scenario characterization angle.\"\n      }\n    },\n    \"plan_sha256\": \"sha256:50a79e3fd996e71f5c562cbdce8dd09613a1789af043da1dfb33ae55d2f04a7a\",\n    \"affected_files\": [\n      \"curriculum/modules/module-demo/source-map.yaml\",\n      \"curriculum/modules/module-demo/units/unit-demo-l01/study-map.yaml\"\n    ],\n    \"artifact_ids\": [\n      \"module-demo\",\n      \"study-map-demo-l01\",\n      \"unit-demo-l01\"\n    ],\n    \"expected_revisions\": {\n      \"module-demo\": 0,\n      \"study-map-demo-l01\": 0,\n      \"unit-demo-l01\": 3\n    },\n    \"ok\": true,\n    \"transaction_id\": \"TX1\",\n    \"receipt_path\": \"operations/transactions/TX1.yaml\",\n    \"artifact_revisions\": {\n      \"module-demo\": 1,\n      \"study-map-demo-l01\": 1,\n      \"unit-demo-l01\": 4\n    },\n    \"snapshot_after\": \"SNAP1\",\n    \"replayed\": false\n  },\n  \"error\": null\n}\n",
+  "stdout": "{\n  \"schema_version\": 2,\n  \"request_id\": \"KEY1\",\n  \"idempotency_key\": \"KEY2\",\n  \"capability\": \"route.patch\",\n  \"ok\": true,\n  \"replayed\": false,\n  \"transaction_id\": \"TX1\",\n  \"receipt_path\": \"operations/transactions/TX1.yaml\",\n  \"snapshot_after\": \"SNAP1\",\n  \"result\": {\n    \"schema_version\": 1,\n    \"unit_id\": \"unit-demo-l01\",\n    \"route_id\": \"route-b2f1f80014860a929a3af0bc\",\n    \"changes\": {\n      \"angle\": {\n        \"before\": \"Derives the weighted sum and works a discrete example.\",\n        \"after\": \"Scenario characterization angle.\"\n      }\n    },\n    \"claim_anchors\": [],\n    \"claims\": [\n      {\n        \"claim_id\": \"covers:route-b2f1f80014860a929a3af0bc\",\n        \"before\": \"stale\",\n        \"after\": \"will-be-stale\",\n        \"warning\": \"covers:route-b2f1f80014860a929a3af0bc remains stale; re-judge with unit-plan-revise unit-demo-l01 --file REVISION.yaml --check\",\n        \"next\": \"unit-plan-revise unit-demo-l01 --file REVISION.yaml --check\"\n      }\n    ],\n    \"plan_sha256\": \"sha256:50a79e3fd996e71f5c562cbdce8dd09613a1789af043da1dfb33ae55d2f04a7a\",\n    \"affected_files\": [\n      \"curriculum/modules/module-demo/source-map.yaml\",\n      \"curriculum/modules/module-demo/units/unit-demo-l01/study-map.yaml\"\n    ],\n    \"artifact_ids\": [\n      \"module-demo\",\n      \"study-map-demo-l01\",\n      \"unit-demo-l01\"\n    ],\n    \"expected_revisions\": {\n      \"module-demo\": 0,\n      \"study-map-demo-l01\": 0,\n      \"unit-demo-l01\": 3\n    },\n    \"ok\": true,\n    \"transaction_id\": \"TX1\",\n    \"receipt_path\": \"operations/transactions/TX1.yaml\",\n    \"artifact_revisions\": {\n      \"module-demo\": 1,\n      \"study-map-demo-l01\": 1,\n      \"unit-demo-l01\": 4\n    },\n    \"snapshot_after\": \"SNAP1\",\n    \"replayed\": false\n  },\n  \"error\": null\n}\n",
   "stdout_json": {
     "capability": "route.patch",
     "error": null,
@@ -194,6 +195,16 @@
           "before": "Derives the weighted sum and works a discrete example."
         }
       },
+      "claim_anchors": [],
+      "claims": [
+        {
+          "after": "will-be-stale",
+          "before": "stale",
+          "claim_id": "covers:route-b2f1f80014860a929a3af0bc",
+          "next": "unit-plan-revise unit-demo-l01 --file REVISION.yaml --check",
+          "warning": "covers:route-b2f1f80014860a929a3af0bc remains stale; re-judge with unit-plan-revise unit-demo-l01 --file REVISION.yaml --check"
+        }
+      ],
       "expected_revisions": {
         "module-demo": 0,
         "study-map-demo-l01": 0,
