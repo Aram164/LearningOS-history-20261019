@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from learning_os.derive.material_synthesis import publication_lineage_record, synthesis_destination
-from learning_os.derive.semantics.claim_status import observe_claims
+from learning_os.derive.semantics.claim_audits import AuditError, memberships
+from learning_os.derive.semantics.claim_status import observe_claims, read_audits
 from learning_os.derive.semantics.lineage import (
     NODE_CONTENT_PREFIX,
     ROUTE_CONTENT_PREFIX,
@@ -290,6 +291,7 @@ def prepare_claim_admission(root: Path, repo: Repo, module_id: str,
                                   route_ids=[key.removeprefix("covers:") for key in supplied])
     except (ValueError, TransactionFailure) as exc:
         return ClaimAdmission([str(exc)], {}, {}, live)
+    audit_defects: frozenset[tuple[str, str]] | None = None
     for claim_id in supplied:
         rid = claim_id.removeprefix("covers:")
         claim_row = proposed.get(rid) or live.get(rid)
@@ -305,7 +307,16 @@ def prepare_claim_admission(root: Path, repo: Repo, module_id: str,
                 eligible = True
             elif prior.status == "supported":
                 status = statuses.get(claim_id)
-                eligible = status is not None and (status.status == "stale" or status.audit == "defective")
+                if status is not None and status.status == "stale":
+                    eligible = True
+                elif status is not None:
+                    if audit_defects is None:
+                        try:
+                            _, audit_defects = memberships(read_audits(root))
+                        except AuditError as exc:
+                            problems.append(str(exc))
+                            continue
+                    eligible = (claim_id, status.basis) in audit_defects
         if eligible and claim_row is not None:
             changed[rid] = _covers(claim_row)
         else:

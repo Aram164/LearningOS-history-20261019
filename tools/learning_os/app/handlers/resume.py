@@ -22,7 +22,7 @@ from learning_os.derive.learning_runtime import (
 from learning_os.derive.projection.common import first_para as _first_para
 from learning_os.derive.projection.modules_view import academic_deadlines as _academic_deadlines
 from learning_os.derive.projection.resume_dossier import ResumeDossierError, build_resume_dossier
-from learning_os.derive.semantics.claim_status import claims_summary, observe_claims
+from learning_os.derive.semantics.claim_status import claims_summary, observe_claims_with_audits
 from learning_os.derive.semantics.dossiers import (
     DossierError,
     build_dossier,
@@ -220,7 +220,7 @@ def dossier(ctx: OpContext, req: dict) -> Result:
             "evidence_files": len(dict(fresh.content).get("evidence", {})),
         }
         try:
-            payload["claims"] = claims_summary(observe_claims(root, repo=repo, route_ids=[r["id"] for r in routes]))
+            payload["claims"] = claims_summary(observe_claims_with_audits(root, repo=repo, route_ids=[r["id"] for r in routes]))
         except ValueError as exc:
             raise WriteRefused(f"cannot read claim status: {exc}") from exc
         if req.get("json"):

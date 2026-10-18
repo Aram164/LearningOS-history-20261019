@@ -8,11 +8,13 @@ clock. Cases return JSON-serializable records with before/after effects.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from datetime import datetime
@@ -114,6 +116,18 @@ def _build_root(tmp_path: Path, name: str) -> Path:
 
     root = build_mini_repo(tmp_path / name).resolve()
     add_curriculum(root)
+    # This historical engine oracle includes contract bytes in its tree and
+    # snapshot hashes. Keep its original inputs when later contracts change;
+    # the full scenario suite exercises current contracts independently.
+    source = Path(__file__).resolve().parent.parent
+    archive = subprocess.check_output([
+        "git", "archive", "074f4717e14527798752de84b3c9c4e88348b658",
+        "system/contracts", "system/schema"], cwd=source)
+    with tarfile.open(fileobj=io.BytesIO(archive)) as stream:
+        # build_mini_repo deliberately omits host-local attachment policy.
+        members = [entry for entry in stream.getmembers()
+                   if entry.isfile() and (root / entry.name).is_file()]
+        stream.extractall(root, members=members, filter="data")
     return root
 
 

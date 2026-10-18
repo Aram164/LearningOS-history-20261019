@@ -10,13 +10,13 @@ import hashlib
 import json
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from learning_os.derive.semantics.claim_audits import (
     AuditError,
     AuditRecord,
-    audit_records,
+    audits_from_ledger,
     memberships,
 )
 from learning_os.derive.semantics.lineage import (
@@ -130,7 +130,7 @@ def interpret_claims(records: Mapping[str, ClaimLineage], revisions: Mapping[str
 def _read_yaml(path: Path) -> object:
     try:
         return load_yaml(path, path.parent)
-    except (OSError, LoaderError):
+    except (OSError, UnicodeError, LoaderError):
         return None
 
 
@@ -304,22 +304,22 @@ def read_audits(root: Path) -> dict[str, AuditRecord]:
         return {}
     try:
         value: object = load_yaml(path, root)
-    except (LoaderError, OSError) as exc:
+    except (LoaderError, OSError, UnicodeError) as exc:
         raise AuditError(f"cannot read preserved audit state: {exc}") from exc
-    if not isinstance(value, dict) or not isinstance(value.get("decisions"), dict):
-        raise AuditError("cannot read preserved audit state: goal ledger needs a decisions mapping")
-    return audit_records(value.get("audits"))
+    return audits_from_ledger(value)
 
 
 def observe_claims(root: Path, *, repo: Repo | None = None,
                    route_ids: Iterable[str] | None = None,
                    records: Mapping[str, ClaimLineage] | None = None,
+                   audits: Mapping[str, AuditRecord] | None = None,
                    certified: frozenset[tuple[str, str]] = frozenset(),
                    defective: frozenset[tuple[str, str]] = frozenset()) -> dict[str, ClaimStatus]:
     repo = repo if repo is not None else load_repo(root)
     all_records = records if records is not None else load_ledger(root)
-    audits = read_audits(root)
-    recorded_certified, recorded_defective = memberships(audits)
+    # Evidence freshness has no dependency on optional audit storage.
+    # Consumers that need audit authority supply their own validated observation.
+    recorded_certified, recorded_defective = memberships(audits or {})
     certified = certified | recorded_certified
     defective = defective | recorded_defective
     selected = set(route_ids) if route_ids is not None else None
@@ -349,8 +349,22 @@ def observe_claims(root: Path, *, repo: Repo | None = None,
                               certified=certified, defective=defective)
     if selected is None:
         wanted.update("covers:" + rid for rid in owners)
-    return {cid: result.get(cid, ClaimStatus(cid, "unrecorded", unit_id=owners.get(cid.removeprefix("covers:"), "")))
-            for cid in sorted(wanted)}
+    selected_statuses = {cid: result.get(cid, ClaimStatus(cid, "unrecorded", unit_id=owners.get(cid.removeprefix("covers:"), "")))
+                         for cid in sorted(wanted)}
+    if audits is None:
+        return {cid: replace(row, audit="unavailable") if row.audit == "unaudited" else row
+                for cid, row in selected_statuses.items()}
+    return selected_statuses
+
+
+def observe_claims_with_audits(root: Path, *, repo: Repo | None = None,
+                              route_ids: Iterable[str] | None = None) -> dict[str, ClaimStatus]:
+    """Enrich ordinary reads when possible; unavailable audit data grants nothing."""
+    try:
+        audits = read_audits(root)
+    except AuditError:
+        audits = None
+    return observe_claims(root, repo=repo, route_ids=route_ids, audits=audits)
 
 
 def claims_summary(statuses: Mapping[str, ClaimStatus]) -> dict[str, object]:

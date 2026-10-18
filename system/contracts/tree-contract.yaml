@@ -180,6 +180,10 @@ directories:
     owner: tests
     purpose: the test suite and its frozen format fixtures
 
+  - path: workbench
+    owner: architecture
+    purpose: published migration review documents and execution evidence; not learner data
+
 # Hidden entries. Without this section the checker meets eight dotted
 # directories on its first run and the item is unlandable.
 #

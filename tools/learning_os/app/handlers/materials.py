@@ -21,7 +21,7 @@ from learning_os.derive.learning_runtime import (
     stage_results_for,
 )
 from learning_os.derive.material_synthesis import material_synthesis_freshness
-from learning_os.derive.semantics.claim_status import claims_summary, observe_claims
+from learning_os.derive.semantics.claim_status import claims_summary, observe_claims_with_audits
 from learning_os.derive.semantics.source_use import evidence_label as _evidence_label
 from learning_os.derive.semantics.source_use import use_evidence as _use_evidence
 from learning_os.domain.failures import NotFound, StaleSnapshot, WriteRefused, unreadable_refusal
@@ -652,7 +652,7 @@ def plan_edit_context(ctx: OpContext, req: dict) -> Result:
         selected = ([req["route_id"]] if req.get("route_id") else req["route_ids"]
                     if req.get("route_ids") is not None else [row["id"] for row in routes])
         try:
-            claims = observe_claims(root, repo=repo, route_ids=selected)
+            claims = observe_claims_with_audits(root, repo=repo, route_ids=selected)
         except ValueError as exc:
             raise WriteRefused(f"cannot read claim status: {exc}") from exc
         if req.get("route_id"):

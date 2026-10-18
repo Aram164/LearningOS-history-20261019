@@ -178,6 +178,13 @@ def audit_records(value: object) -> dict[str, AuditRecord]:
     return records
 
 
+def audits_from_ledger(value: object) -> dict[str, AuditRecord]:
+    """Validate only the audit evidence boundary in an observed ledger."""
+    if not isinstance(value, dict) or not isinstance(value.get("decisions"), dict):
+        raise AuditError("cannot read preserved audit state: goal ledger needs a decisions mapping")
+    return audit_records(value.get("audits"))
+
+
 def memberships(records: Mapping[str, AuditRecord]) -> tuple[frozenset[tuple[str, str]], frozenset[tuple[str, str]]]:
     certified: set[tuple[str, str]] = set()
     defective: set[tuple[str, str]] = set()

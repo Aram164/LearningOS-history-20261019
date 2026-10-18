@@ -57,17 +57,19 @@ $ grep -n "source_selections:" -A 4 curriculum/modules/module-demo/units/unit-de
 
 ## Place the smallest actionable locator in page grammar
 
-A deck position, not a printed label: file positions open at the page.
+A deck position, not a printed label: file positions open at the page. Keep
+the file identity in the locator and attach the exact quotation at that place
+when rejudging coverage for the material change.
 
 ```scrut
-$ los route-patch unit-demo-l01 route-b2f1f80014860a929a3af0bc --changes '{"locator": "physical PDF pp. 20-22"}' --check | $LOS_REPO/.venv/bin/python -c 'import json,sys; d = json.load(sys.stdin); print(d["ok"], d["check"], d["canonical_files_written"]); print(json.dumps(d["changes"]["locator"], sort_keys=True))'
+$ los route-patch unit-demo-l01 route-b2f1f80014860a929a3af0bc --changes '{"locator": "lecture-01.pdf, PDF pp. 20-22"}' --claim-evidence '{"claim_id": "covers:route-b2f1f80014860a929a3af0bc", "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf", "page": 21, "text": "Worked example part 1 of 4: a biased coin pays two on heads"}]}' --check | $LOS_REPO/.venv/bin/python -c 'import json,sys; d = json.load(sys.stdin); print(d["ok"], d["check"], d["canonical_files_written"]); print(json.dumps(d["changes"]["locator"], sort_keys=True))'
 True True 0
-{"after": "physical PDF pp. 20-22", "before": "lecture-01.pdf"}
+{"after": "lecture-01.pdf, PDF pp. 20-22", "before": "lecture-01.pdf"}
 ```
 
 ```scrut {output_stream: stderr}
-$ $H/los-seal --capability route.patch --payload '{"unit_id": "unit-demo-l01", "route_id": "route-b2f1f80014860a929a3af0bc", "changes": {"locator": "physical PDF pp. 20-22"}}' --key s26-locator --request-id request-s26-locator --guards auto --out "$TMPDIR/s26-locator.json"
-seal_envelope: guards auto: module-demo=0, study-map-demo-l01=0, unit-demo-l01=3
+$ $H/los-seal --capability route.patch --payload '{"unit_id": "unit-demo-l01", "route_id": "route-b2f1f80014860a929a3af0bc", "changes": {"locator": "lecture-01.pdf, PDF pp. 20-22"}, "claim_evidence": {"claim_id": "covers:route-b2f1f80014860a929a3af0bc", "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf", "page": 21, "text": "Worked example part 1 of 4: a biased coin pays two on heads"}]}}' --key s26-locator --request-id request-s26-locator --guards auto --out "$TMPDIR/s26-locator.json"
+seal_envelope: guards auto: file:operations/transactions/lineage.yaml=0, module-demo=0, study-map-demo-l01=0, unit-demo-l01=3
 ```
 
 ```scrut
@@ -81,7 +83,7 @@ $ los capability route.patch --payload-file "$TMPDIR/s26-locator.json"
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-001",
   "receipt_path": "operations/transactions/transaction-20261001-090000-001.yaml",
-  "snapshot_after": "sha256:2fbab4c5fb6c6fdd4929c0c8101492a15bee3321d4fb8d77faf484b1074bf952",
+  "snapshot_after": "sha256:840f25a37725e13cf9c4cd2a687dcd14a67f7bda23fe04bd4808b8c94be303d1",
   "result": {
     "schema_version": 1,
     "unit_id": "unit-demo-l01",
@@ -89,21 +91,59 @@ $ los capability route.patch --payload-file "$TMPDIR/s26-locator.json"
     "changes": {
       "locator": {
         "before": "lecture-01.pdf",
-        "after": "physical PDF pp. 20-22"
+        "after": "lecture-01.pdf, PDF pp. 20-22"
       }
     },
-    "plan_sha256": "sha256:5b1502ca0d0b55a5b858268aae38420172e1c5096fc9f0ca1e281dc4b301a33b",
+    "claim_anchors": [
+      {
+        "claim_id": "covers:route-b2f1f80014860a929a3af0bc",
+        "classification": "anchored",
+        "quotes": [
+          {
+            "ref": "material://source-demo-book/lecture-01.pdf",
+            "text": "Worked example part 1 of 4: a biased coin pays two on heads",
+            "page": 21,
+            "page_end": null,
+            "window": null,
+            "node": "",
+            "matched": true
+          }
+        ],
+        "bindings": [
+          {
+            "material": "material://source-demo-book/lecture-01.pdf",
+            "manifest": "source-demo-book/lecture-01.pdf",
+            "sha256": "395ded80ff4a721e2a91f400a3c6a3abd1f8d37e3c7f70b5ef42fa30d5264ea5",
+            "place": "p21",
+            "language": "en"
+          }
+        ]
+      }
+    ],
+    "claims": [
+      {
+        "claim_id": "covers:route-b2f1f80014860a929a3af0bc",
+        "before": "stale",
+        "after": "rejudged",
+        "warning": "",
+        "next": ""
+      }
+    ],
+    "plan_sha256": "sha256:b9f78241d3f717544d1b2bcdb7ae0c36b05c492ee845924132c94522bb6f8346",
     "affected_files": [
       "curriculum/modules/module-demo/source-map.yaml",
       "curriculum/modules/module-demo/units/unit-demo-l01/study-map.yaml",
-      "curriculum/modules/module-demo/units/unit-demo-l01/unit.yaml"
+      "curriculum/modules/module-demo/units/unit-demo-l01/unit.yaml",
+      "operations/transactions/lineage.yaml"
     ],
     "artifact_ids": [
+      "file:operations/transactions/lineage.yaml",
       "module-demo",
       "study-map-demo-l01",
       "unit-demo-l01"
     ],
     "expected_revisions": {
+      "file:operations/transactions/lineage.yaml": 0,
       "module-demo": 0,
       "study-map-demo-l01": 0,
       "unit-demo-l01": 3
@@ -112,11 +152,12 @@ $ los capability route.patch --payload-file "$TMPDIR/s26-locator.json"
     "transaction_id": "transaction-20261001-090000-001",
     "receipt_path": "operations/transactions/transaction-20261001-090000-001.yaml",
     "artifact_revisions": {
+      "file:operations/transactions/lineage.yaml": 1,
       "module-demo": 1,
       "study-map-demo-l01": 1,
       "unit-demo-l01": 4
     },
-    "snapshot_after": "sha256:2fbab4c5fb6c6fdd4929c0c8101492a15bee3321d4fb8d77faf484b1074bf952",
+    "snapshot_after": "sha256:840f25a37725e13cf9c4cd2a687dcd14a67f7bda23fe04bd4808b8c94be303d1",
     "replayed": false
   },
   "error": null
@@ -132,8 +173,8 @@ $ $H/los-assert-receipt --last --capability route.patch
 ## The route carries the file-position locator
 
 ```scrut
-$ grep -n "physical PDF pp. 20-22" curriculum/modules/module-demo/source-map.yaml
-19:    locator: physical PDF pp. 20-22
+$ grep -n "lecture-01.pdf, PDF pp. 20-22" curriculum/modules/module-demo/source-map.yaml
+19:    locator: lecture-01.pdf, PDF pp. 20-22
 ```
 
 ## Record lightweight personal evidence on the stage
@@ -154,7 +195,7 @@ $ los capability source.feedback.record --payload-file "$TMPDIR/s26-fb.json"
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-002",
   "receipt_path": "operations/transactions/transaction-20261001-090000-002.yaml",
-  "snapshot_after": "sha256:ce5f52d65705f7d18993c6d51502a18e8ef07f960962505da4614a7bc0ed2f38",
+  "snapshot_after": "sha256:6ef527242fad5e036ba39e4eb6496e30fd9ed7ea1e728604eaafe61d5b0ed421",
   "result": {
     "ok": true,
     "unit_id": "unit-demo-l01",
@@ -170,7 +211,7 @@ $ los capability source.feedback.record --payload-file "$TMPDIR/s26-fb.json"
       "study-map-demo-l01": 2,
       "unit-demo-l01": 5
     },
-    "snapshot_after": "sha256:ce5f52d65705f7d18993c6d51502a18e8ef07f960962505da4614a7bc0ed2f38",
+    "snapshot_after": "sha256:6ef527242fad5e036ba39e4eb6496e30fd9ed7ea1e728604eaafe61d5b0ed421",
     "replayed": false
   },
   "error": null
@@ -201,7 +242,7 @@ $ los capability source.feedback.record --payload-file "$TMPDIR/s26-fb2.json"
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-003",
   "receipt_path": "operations/transactions/transaction-20261001-090000-003.yaml",
-  "snapshot_after": "sha256:ef1c1d86a9f92b087a961e6c4332b9a090ec0b0e0039396d53619167274a233b",
+  "snapshot_after": "sha256:5b5fddf9e71f8cac6746ba54c7922fafab72204bbfea5ec4b3fbd8073cad0de9",
   "result": {
     "ok": true,
     "unit_id": "unit-demo-l01",
@@ -219,7 +260,7 @@ $ los capability source.feedback.record --payload-file "$TMPDIR/s26-fb2.json"
       "study-map-demo-l01": 3,
       "unit-demo-l01": 6
     },
-    "snapshot_after": "sha256:ef1c1d86a9f92b087a961e6c4332b9a090ec0b0e0039396d53619167274a233b",
+    "snapshot_after": "sha256:5b5fddf9e71f8cac6746ba54c7922fafab72204bbfea5ec4b3fbd8073cad0de9",
     "replayed": false
   },
   "error": null

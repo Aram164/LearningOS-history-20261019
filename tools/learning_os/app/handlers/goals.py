@@ -204,7 +204,7 @@ def goal(ctx: OpContext, req: dict) -> Result:
                         raise AuditError("audit was already frozen; redraw is refused")
                     updated = prior
                 else:
-                    statuses = observe_claims(root)
+                    statuses = observe_claims(root, audits=audits)
                     pool = eligible_pool(statuses.values())
                     if authorization.pool != pool:
                         raise AuditError("audit authorization must freeze the complete current eligible pool")

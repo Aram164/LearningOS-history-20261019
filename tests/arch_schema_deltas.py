@@ -9,6 +9,40 @@ and the D16 schema check apply exactly the same allowances.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
+import subprocess
+from pathlib import Path
+
+
+def _c1_packet() -> dict:
+    root = Path(__file__).resolve().parent.parent
+    raw = (root / "workbench/architecture-hardening-2026-10-17/execution/C1-SURFACE-PACKET.json").read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == "8e7781d6d10071e25eb0bc51cc0d068bbecffd51340946f1d82a7c107c31d2cf"
+    return json.loads(raw)
+
+
+def _before_approved_c1_cli(key: str, live: list) -> list:
+    """Undo only the exact later C1 addition for historical D16 comparisons."""
+    if key not in {"cli.goal", "cli.route-patch"}:
+        return live
+    change = _c1_packet()["changes"][key]
+    assert live == change["after"], key
+    return change["before"]
+
+
+def _before_approved_c1_schema(operation: str, raw: bytes) -> dict:
+    """Require approved live bytes before comparing earlier schema migrations."""
+    if operation not in {"goal.decide", "route.patch"}:
+        return json.loads(raw)
+    packet = _c1_packet()
+    change = packet["changes"][f"request_schemas.{operation}.schema.json"]
+    assert hashlib.sha256(raw).hexdigest() == change["after"], operation
+    root = Path(__file__).resolve().parent.parent
+    before = subprocess.check_output(
+        ["git", "show", f"{packet['base_core']}:system/schema/requests/{operation}.schema.json"], cwd=root)
+    assert hashlib.sha256(before).hexdigest() == change["before"], operation
+    return json.loads(before)
 
 #: Exact SPEC (ay) owner metadata per primary request-schema file: node
 #: pointer parts -> (owner, owner_shape). Alias files carry no metadata.

@@ -56,7 +56,7 @@ $ los capability note.create --payload-file "$TMPDIR/crosswalk-create.json"
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-001",
   "receipt_path": "operations/transactions/transaction-20261001-090000-001.yaml",
-  "snapshot_after": "sha256:e4cc5f2f49a2462434f4c792daf4bfb7f96047f82efe6366c2ead4065e2106a5",
+  "snapshot_after": "sha256:dd21b38ecedf0d41d5ec0c4a95b426a9dead6cd55fc0de2963fb3603c7b84d12",
   "result": {
     "ok": true,
     "note_id": "note-demo-crosswalk",
@@ -67,7 +67,7 @@ $ los capability note.create --payload-file "$TMPDIR/crosswalk-create.json"
     "artifact_revisions": {
       "note-demo-crosswalk": 1
     },
-    "snapshot_after": "sha256:e4cc5f2f49a2462434f4c792daf4bfb7f96047f82efe6366c2ead4065e2106a5",
+    "snapshot_after": "sha256:dd21b38ecedf0d41d5ec0c4a95b426a9dead6cd55fc0de2963fb3603c7b84d12",
     "replayed": false
   },
   "error": null
@@ -133,7 +133,7 @@ $ los capability note.revise --payload-file "$TMPDIR/crosswalk-narrative.json"
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-002",
   "receipt_path": "operations/transactions/transaction-20261001-090000-002.yaml",
-  "snapshot_after": "sha256:8d019b1be5e78b343548aec1db5c268ca405114cfcf34ab32d26eba345e980f5",
+  "snapshot_after": "sha256:8a85f9fed15784cd6abb8abe1c24c1512d142ad263a47cbe6424811de70dc929",
   "result": {
     "ok": true,
     "note_id": "note-demo-crosswalk",
@@ -143,7 +143,7 @@ $ los capability note.revise --payload-file "$TMPDIR/crosswalk-narrative.json"
     "artifact_revisions": {
       "note-demo-crosswalk": 2
     },
-    "snapshot_after": "sha256:8d019b1be5e78b343548aec1db5c268ca405114cfcf34ab32d26eba345e980f5",
+    "snapshot_after": "sha256:8a85f9fed15784cd6abb8abe1c24c1512d142ad263a47cbe6424811de70dc929",
     "replayed": false
   },
   "error": null
@@ -196,7 +196,7 @@ $ los capability source.record.revise --payload-file "$TMPDIR/crosswalk-judgment
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-003",
   "receipt_path": "operations/transactions/transaction-20261001-090000-003.yaml",
-  "snapshot_after": "sha256:3b63a41ed29729bd2055563a5ae8427ab20db5ee7a44ad78605e86c91470ecd6",
+  "snapshot_after": "sha256:7851690e6032655af2cc2e955ca529f33bd0b26f1e524c033755fad4e102ff15",
   "result": {
     "ok": true,
     "transaction_id": "transaction-20261001-090000-003",
@@ -204,7 +204,7 @@ $ los capability source.record.revise --payload-file "$TMPDIR/crosswalk-judgment
     "artifact_revisions": {
       "source-demo-book": 1
     },
-    "snapshot_after": "sha256:3b63a41ed29729bd2055563a5ae8427ab20db5ee7a44ad78605e86c91470ecd6",
+    "snapshot_after": "sha256:7851690e6032655af2cc2e955ca529f33bd0b26f1e524c033755fad4e102ff15",
     "replayed": false
   },
   "error": null
@@ -290,7 +290,7 @@ $ los capability note.revise --payload-file "$TMPDIR/crosswalk-table.json"
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-004",
   "receipt_path": "operations/transactions/transaction-20261001-090000-004.yaml",
-  "snapshot_after": "sha256:b2778e9481a8d1e03a260001662aa26fec7ced50259f14259872b754af2e6366",
+  "snapshot_after": "sha256:0f819cf1fcaa586f9137db709565654c0261f95fc81c5c546059bd4b619f2608",
   "result": {
     "ok": true,
     "note_id": "note-demo-crosswalk",
@@ -300,7 +300,7 @@ $ los capability note.revise --payload-file "$TMPDIR/crosswalk-table.json"
     "artifact_revisions": {
       "note-demo-crosswalk": 3
     },
-    "snapshot_after": "sha256:b2778e9481a8d1e03a260001662aa26fec7ced50259f14259872b754af2e6366",
+    "snapshot_after": "sha256:0f819cf1fcaa586f9137db709565654c0261f95fc81c5c546059bd4b619f2608",
     "replayed": false
   },
   "error": null
@@ -343,7 +343,7 @@ $ los capability note.revise --payload-file "$TMPDIR/crosswalk-restore.json"
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-005",
   "receipt_path": "operations/transactions/transaction-20261001-090000-005.yaml",
-  "snapshot_after": "sha256:3b63a41ed29729bd2055563a5ae8427ab20db5ee7a44ad78605e86c91470ecd6",
+  "snapshot_after": "sha256:7851690e6032655af2cc2e955ca529f33bd0b26f1e524c033755fad4e102ff15",
   "result": {
     "ok": true,
     "note_id": "note-demo-crosswalk",
@@ -353,7 +353,7 @@ $ los capability note.revise --payload-file "$TMPDIR/crosswalk-restore.json"
     "artifact_revisions": {
       "note-demo-crosswalk": 4
     },
-    "snapshot_after": "sha256:3b63a41ed29729bd2055563a5ae8427ab20db5ee7a44ad78605e86c91470ecd6",
+    "snapshot_after": "sha256:7851690e6032655af2cc2e955ca529f33bd0b26f1e524c033755fad4e102ff15",
     "replayed": false
   },
   "error": null

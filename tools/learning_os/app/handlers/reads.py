@@ -23,10 +23,10 @@ from learning_os.derive.projection.learner_interpreter import (
 )
 from learning_os.derive.projection.projection.atlas import STAGE_CONCEPT
 from learning_os.derive.projection.session_compiler import compile_session, replan_session
-from learning_os.derive.semantics.claim_status import _read_yaml
-from learning_os.derive.semantics.goals import RankedCluster, detector_metrics, goal_to_dict
+from learning_os.derive.semantics.goals import RankedCluster, goal_to_dict
 from learning_os.derive.semantics.predicates import PREDICATES, evaluate
 from learning_os.derive.semantics.recipes import RecipeError, recipes_for
+from learning_os.derive.semantics.scan import observe_goal_ledger
 from learning_os.derive.semantics.session_counts import FeedError, feed_scan_kwargs
 from learning_os.derive.semantics.source_use import evidence_label as _evidence_label
 from learning_os.derive.semantics.source_use import use_evidence as _use_evidence
@@ -735,7 +735,8 @@ def intelligence_scan(ctx: OpContext, req: dict) -> Result:
             ) from exc
     root = ctx.root
     try:
-        goals, ranked, hidden = ranked_scan(root, days=req["days"], feed=feed)
+        ledger = observe_goal_ledger(root)
+        goals, ranked, hidden = ranked_scan(root, days=req["days"], feed=feed, goal_ledger=ledger)
     except GitHistoryError as exc:
         raise WriteRefused(
             f"intelligence scan: cannot read Git history: {exc}",
@@ -750,8 +751,7 @@ def intelligence_scan(ctx: OpContext, req: dict) -> Result:
         ) from exc
     if req.get("brief"):
         payload = _brief_scan_page(req, goals, ranked)
-        ledger = _read_yaml(root / "operations/goal-ledger.yaml")
-        payload["detectors"] = detector_metrics(ledger.get("decisions", {}) if isinstance(ledger, dict) else {})
+        payload["detectors"] = {key: dict(row) for key, row in ledger.metrics.items()}
     else:
         payload = {"goals": [goal_to_dict(goal) for goal in goals]}
     view = {

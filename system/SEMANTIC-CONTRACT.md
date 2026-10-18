@@ -142,6 +142,16 @@ current drift and blocking assumptions, excluding clocks, unrelated snapshots
 and read ordering. Full digests persist in IDs and records. Identical facts
 reuse a decision; different drift produces another occurrence.
 
+Evidence freshness is independent of optional audit enrichment. Ordinary plan
+inspection retains basic claim facts when audit storage is malformed and marks
+its audit membership `unavailable`, never clean or certified. An audit-dependent
+rejudgment, authorization or closure requires valid current audit evidence;
+complete audit-queue scans also refuse unavailable evidence rather than silently
+omit disputes or propose an unverified pool. One immutable goal-ledger
+observation feeds each scan, including ranking, hidden decisions and metrics.
+It is request-local only: a later write/check revalidates its own evidence and
+existing snapshot/revision guards, without trusting an earlier scan observation.
+
 One `lineage-stale` detector reports each stale claim, with causes and
 root-cause clustering. `claims-needing-review` reports contests and exact-basis
 audit defects, not every unreviewed claim. Supported fresh covers claims outside

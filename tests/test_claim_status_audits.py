@@ -5,6 +5,8 @@ import copy
 import hashlib
 import json
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -12,7 +14,10 @@ from repo_builders import run_los, write_yaml
 
 from learning_os.derive.semantics.claim_audits import (
     ALGORITHM,
+    AuditAuthorization,
     AuditError,
+    AuditRecord,
+    AuditResult,
     ClaimBasis,
     audit_id,
     audit_records,
@@ -25,6 +30,8 @@ from learning_os.derive.semantics.claim_status import (
     interpret_claims,
     judgment_basis,
     observe_claims,
+    observe_claims_with_audits,
+    read_audits,
 )
 from learning_os.derive.semantics.goals import (
     cluster_goals,
@@ -37,7 +44,7 @@ from learning_os.derive.semantics.lineage import (
     record_claim,
     to_dict,
 )
-from learning_os.derive.semantics.scan import intelligence_scan
+from learning_os.derive.semantics.scan import intelligence_scan, observe_goal_ledger
 
 
 def claim(cid="covers:route-one", **kwargs):
@@ -200,7 +207,7 @@ def test_failed_audit_defects_match_exact_basis_and_require_repair_before_new_po
     old = records[defective]
     records[defective] = replace(old, statement="Reviewed repair teaches a narrower node.", supersedes=to_dict(old))
     (mini_repo / "operations/transactions/lineage.yaml").write_text(dump_ledger(records))
-    assert observe_claims(mini_repo)[defective].audit == "unaudited"
+    assert observe_claims_with_audits(mini_repo)[defective].audit == "unaudited"
     goals = intelligence_scan(mini_repo)
     assert len(goals) == 1 and goals[0].detector == "claims-audit" and goals[0].goal_id != gid
     # Historical closure remains bound to the original pool after repair.
@@ -274,8 +281,13 @@ def test_malformed_audit_state_cannot_silently_hide_disputes(mini_repo):
     path = mini_repo / "operations/goal-ledger.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("decisions: {}\naudits: [broken")
+    basic = observe_claims(mini_repo, route_ids=["route-a"])
+    assert basic["covers:route-a"].audit == "unavailable"
+    assert observe_claims_with_audits(mini_repo, route_ids=["route-a"]) == basic
     with pytest.raises(AuditError, match="preserved audit state"):
-        observe_claims(mini_repo, route_ids=["route-a"])
+        read_audits(mini_repo)
+    with pytest.raises(AuditError, match="preserved audit state"):
+        intelligence_scan(mini_repo)
 
 
 def test_reject_requires_note_and_authorized_goal_stays_detectable(mini_repo):
@@ -326,3 +338,132 @@ def test_quieting_hides_only_attention_and_preserves_full_json(mini_repo):
     assert payload["groups"] == [] and payload["detectors"]["claims-audit"]["quiet"] is True
     from learning_os.app.handlers.resume import _top_cluster
     assert _top_cluster(mini_repo) is None
+
+
+@pytest.mark.parametrize("entry", ["scan", "ranked", "brief-handler", "full-handler"])
+def test_entire_scan_uses_one_immutable_ledger_observation(mini_repo, monkeypatch, entry):
+    from learning_os.app.handlers.reads import intelligence_scan as handle_scan
+    from learning_os.app.ranking import ranked_scan
+
+    pool_world(mini_repo, 30)
+    path = mini_repo / "operations/goal-ledger.yaml"
+    initial = {"schema_version": 1, "type": "goal-ledger", "decisions": {}}
+    write_yaml(path, initial)
+    changed = {**initial, "decisions": {
+        f"claims-audit:{i:064x}": {"state": "rejected", "decided_at": "2026-10-18", "note": "Reviewed"}
+        for i in range(10)}}
+    reads = []
+    original = Path.read_text
+
+    def interposed_read(self, *args, **kwargs):
+        value = original(self, *args, **kwargs)
+        if self == path:
+            reads.append(value)
+            if len(reads) == 1:
+                write_yaml(path, changed)
+        return value
+
+    monkeypatch.setattr(Path, "read_text", interposed_read)
+    if entry == "scan":
+        goals = intelligence_scan(mini_repo)
+    elif entry == "ranked":
+        goals, _, hidden = ranked_scan(mini_repo)
+        assert hidden == 0
+    else:
+        result = handle_scan(SimpleNamespace(root=mini_repo), {"days": 30, "brief": entry == "brief-handler"})
+        assert result.human_view["hidden_count"] == 0
+        if entry == "brief-handler":
+            assert result.payload["detectors"]["claims-audit"]["decisions"] == 0
+            assert result.payload["total_groups"] == 1
+        else:
+            assert result.payload["goals"][0]["quiet"] is False
+        goals = None
+    assert len(reads) == 1
+    if goals is not None:
+        assert len(goals) == 1 and goals[0].quiet is False
+    later = intelligence_scan(mini_repo)
+    assert len(reads) == 2 and later[0].quiet is True
+
+
+def test_observed_goal_metrics_cannot_be_mutated_or_refreshed_implicitly(mini_repo):
+    path = mini_repo / "operations/goal-ledger.yaml"
+    write_yaml(path, {"decisions": {}})
+    observed = observe_goal_ledger(mini_repo)
+    with pytest.raises(TypeError):
+        observed.metrics["claims-audit"]["quiet"] = True
+    with pytest.raises(TypeError):
+        observed.metrics["unexpected"] = {}
+    write_yaml(path, {"decisions": {"study-map-obligation:unit-x": {"state": "rejected"}}})
+    assert observed.known_ids == ()
+    assert observe_goal_ledger(mini_repo).known_ids == ("study-map-obligation:unit-x",)
+
+
+@pytest.mark.parametrize("content", ["decisions: {}\naudits: []\n", "decisions: {}\naudits: [broken", b"\xff"])
+@pytest.mark.parametrize("shape", ["route", "brief", "stage"])
+def test_unavailable_optional_audit_does_not_disable_plan_inspection(mini_repo, content, shape):
+    from repo_builders import _compact_setup
+
+    _compact_setup(mini_repo)
+    path = mini_repo / "operations/goal-ledger.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = content.encode() if isinstance(content, str) else content
+    path.write_bytes(raw)
+    suffix = {"route": ["--route-id", "route-demo-book"], "brief": ["--brief"], "stage": ["--stage-id", "stage-demo"]}[shape]
+    proc = run_los(mini_repo, "plan-edit-context", "unit-demo-l01", *suffix, "--json")
+    assert proc.returncode == 0, proc.stderr
+    data = json.loads(proc.stdout)
+    if shape == "route":
+        assert data["claim"]["audit"] == "unavailable"
+    elif shape == "brief":
+        assert data["claims"]["audit_counts"]["unavailable"] > 0
+    else:
+        assert "claim" not in data and "claims" not in data
+    assert path.read_bytes() == raw
+
+
+def test_fresh_dispute_rejudgment_revalidates_audit_evidence_per_check(mini_repo):
+    from test_verbatim_anchor_admission import _patch_world
+
+    from learning_os.app.claim_admission import prepare_claim_admission
+    from learning_os.store.loader import load_repo
+
+    evidence = _patch_world(mini_repo)
+    record = claim("covers:route-test")
+    records = {record.claim_id: record, **{f"covers:other-{i}": claim(f"covers:other-{i}") for i in range(29)}}
+    lineage = mini_repo / "operations/transactions/lineage.yaml"
+    lineage.parent.mkdir(parents=True, exist_ok=True)
+    lineage.write_text(dump_ledger(records))
+    pool = tuple(sorted(ClaimBasis(cid, judgment_basis(row)) for cid, row in records.items()))
+    seed = "ab" * 32
+    authorization = AuditAuthorization(pool, seed, sample_pool(pool, seed))
+    defect = ClaimBasis(record.claim_id, judgment_basis(record))
+    result = AuditResult(authorization.sample, (defect,), "independent-reviewer", "report.md", "a" * 64)
+    path = mini_repo / "operations/goal-ledger.yaml"
+    write_yaml(path, {"decisions": {}, "audits": {audit_id(pool): AuditRecord(authorization, result).payload()}})
+    observed = observe_goal_ledger(mini_repo)
+    assert intelligence_scan(mini_repo, goal_ledger=observed)[0].detector == "claims-needing-review"
+    package = {"claim_evidence": [evidence]}
+    repo = load_repo(mini_repo)
+    assert prepare_claim_admission(mini_repo, repo, "module-demo", package).problems == []
+    before = lineage.read_bytes()
+    path.write_text("decisions: {}\naudits: [broken")
+    refused = prepare_claim_admission(mini_repo, repo, "module-demo", package)
+    assert any("preserved audit state" in problem for problem in refused.problems)
+    assert lineage.read_bytes() == before
+    write_yaml(path, {"decisions": {}, "audits": {}})
+    refused = prepare_claim_admission(mini_repo, repo, "module-demo", package)
+    assert any("not stale or disputed" in problem for problem in refused.problems)
+    assert intelligence_scan(mini_repo, goal_ledger=observed)[0].detector == "claims-needing-review"
+    assert intelligence_scan(mini_repo)[0].detector == "claims-audit"
+
+
+def test_basic_claim_evidence_never_reads_optional_audit_storage(mini_repo, monkeypatch):
+    import learning_os.derive.semantics.claim_status as owner
+
+    pool_world(mini_repo, 30)
+    def unexpected(*args, **kwargs):
+        pytest.fail("basic claim evidence must not access audit storage")
+    monkeypatch.setattr(owner, "read_audits", unexpected)
+    states = observe_claims(mini_repo)
+    assert len(states) == 30
+    assert all(row.status == "supported" and row.audit == "unavailable" for row in states.values())

@@ -39,13 +39,14 @@ import datetime as _dt
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 
 from learning_os.derive.learning_runtime import (
     RuntimeInputError,
     collect_requirements,
     read_observations,
 )
-from learning_os.derive.semantics.claim_audits import AuditRecord, audit_records
+from learning_os.derive.semantics.claim_audits import AuditError, AuditRecord, audits_from_ledger
 from learning_os.derive.semantics.claim_status import ClaimStatus, _read_yaml, observe_claims
 from learning_os.derive.semantics.goals import (
     CandidateGoal,
@@ -89,6 +90,10 @@ def read_goal_ledger(root: Path, *, today: _dt.date | None = None) -> tuple[str,
     decisions = data.get("decisions")
     if not isinstance(decisions, dict):
         return ()
+    return _decided_goal_ids(decisions, today=today)
+
+
+def _decided_goal_ids(decisions: Mapping[str, object], *, today: _dt.date | None = None) -> tuple[str, ...]:
     day = today or observations.today()
     known = []
     for goal_id, row in decisions.items():
@@ -106,6 +111,30 @@ def read_goal_ledger(root: Path, *, today: _dt.date | None = None) -> tuple[str,
                 continue
         known.append(goal_id)
     return tuple(sorted(known))
+
+
+@dataclass(frozen=True)
+class GoalLedgerObservation:
+    """Immutable values for one read operation, never later write authority."""
+
+    known_ids: tuple[str, ...]
+    audits: tuple[tuple[str, AuditRecord], ...]
+    metrics: Mapping[str, Mapping[str, object]]
+
+
+def observe_goal_ledger(root: Path | str) -> GoalLedgerObservation:
+    path = Path(root) / GOAL_LEDGER_RELATIVE
+    value = _read_yaml(path)
+    if value is None and not path.exists() and not path.is_symlink():
+        value = {"decisions": {}}
+    if value is None:
+        raise AuditError("cannot read preserved audit state: goal ledger is unreadable or malformed")
+    audits = audits_from_ledger(value)
+    assert isinstance(value, dict)  # Validated by audits_from_ledger.
+    decisions = {key: row for key, row in value["decisions"].items() if isinstance(key, str)}
+    metrics = MappingProxyType({key: MappingProxyType(row)
+                                for key, row in detector_metrics(decisions).items()})
+    return GoalLedgerObservation(_decided_goal_ids(decisions), tuple(sorted(audits.items())), metrics)
 
 
 @dataclass(frozen=True)
@@ -195,7 +224,8 @@ def scan_observations(observations: ScanInput) -> tuple[CandidateGoal, ...]:
 
 
 def collect_observations(root: Path | str, *,
-                         days: int = DEFAULT_DAYS) -> ScanInput:
+                         days: int = DEFAULT_DAYS,
+                         goal_ledger: GoalLedgerObservation | None = None) -> ScanInput:
     """OBSERVE: read the current world. No writes, no queue, no memory.
 
     ``days`` is retained for caller compatibility and ignored:
@@ -204,9 +234,9 @@ def collect_observations(root: Path | str, *,
     """
     root = Path(root)
     repo = load_repo(root)
-    status_map = observe_claims(root, repo=repo)
-    ledger = _read_yaml(root / GOAL_LEDGER_RELATIVE)
-    audits = audit_records(ledger.get("audits") if isinstance(ledger, dict) else None)
+    ledger = goal_ledger if goal_ledger is not None else observe_goal_ledger(root)
+    audits = dict(ledger.audits)
+    status_map = observe_claims(root, repo=repo, audits=audits)
     study_map_units = set()
     for smap in (getattr(repo, "study_maps", {}) or {}).values():
         unit_id = getattr(smap, "unit_id", None)
@@ -226,10 +256,9 @@ def collect_observations(root: Path | str, *,
     # Decided goals stay decided: Aram's explicit reject/defer/close feeds
     # the detectors' `known_ids` dedup, so every scan stops re-emitting
     # what he already judged. The write side lives in
-    # `commands/goal.py`; this read stays tolerant on purpose — a missing
-    # ledger means no decisions yet, and a malformed row is skipped rather
-    # than trusted, so the scan degrades to re-emitting, never to lying.
-    decided = read_goal_ledger(root)
+    # `commands/goal.py`. The shared observation validates ledger structure;
+    # malformed decision rows are skipped rather than trusted as decisions.
+    decided = ledger.known_ids
     # Learning-side truth maintenance: results held against requirements
     # that moved since. An unreadable runtime degrades to no evidence
     # goals — the scan reports the world, never a traceback.
@@ -252,6 +281,7 @@ def collect_observations(root: Path | str, *,
 def intelligence_scan(root: Path | str, *,
                       days: int = DEFAULT_DAYS,
                       feed: Mapping | None = None,
+                      goal_ledger: GoalLedgerObservation | None = None,
                       ) -> tuple[CandidateGoal, ...]:
     """One observation loop: read the world, interpret, propose.
 
@@ -260,10 +290,10 @@ def intelligence_scan(root: Path | str, *,
     behaves exactly like no feed: the three count detectors stay
     silent. The scan records nothing either way.
     """
-    observations = collect_observations(root, days=days)
+    ledger = goal_ledger if goal_ledger is not None else observe_goal_ledger(Path(root))
+    observations = collect_observations(root, days=days, goal_ledger=ledger)
     if feed:
         observations = replace(observations, **feed_scan_kwargs(feed))
     goals = scan_observations(observations)
-    ledger = _read_yaml(Path(root) / GOAL_LEDGER_RELATIVE)
-    metrics = detector_metrics(ledger.get("decisions", {}) if isinstance(ledger, dict) else {})
+    metrics = ledger.metrics
     return tuple(replace(goal, quiet=metrics.get(goal.detector, {}).get("quiet") is True) for goal in goals)

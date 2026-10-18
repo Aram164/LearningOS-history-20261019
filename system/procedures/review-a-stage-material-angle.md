@@ -44,16 +44,17 @@ resource-demo-route-mirror | Demo book — expected-value derivation | lecture-0
 ## Bind the route to its exact inspected file
 
 A correction needs exact inspected bytes, so the route names its file
-before anything is reviewed.
+before anything is reviewed. The material-binding change carries exact-file
+quotation evidence for its coverage judgment as well as the later angle review.
 
 ```scrut
-$ los route-patch unit-demo-l01 route-b2f1f80014860a929a3af0bc --changes '{"vault_path": "material://source-demo-book/book.pdf"}' --check | $LOS_REPO/.venv/bin/python -c 'import json,sys; d = json.load(sys.stdin); print(d["ok"], d["check"], d["canonical_files_written"])'
+$ los route-patch unit-demo-l01 route-b2f1f80014860a929a3af0bc --changes '{"vault_path": "material://source-demo-book/lecture-01.pdf"}' --claim-evidence '{"claim_id": "covers:route-b2f1f80014860a929a3af0bc", "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf", "page": 1, "text": "Expected value, page 1 of 24: an outcome is a value a variable can take"}]}' --check | $LOS_REPO/.venv/bin/python -c 'import json,sys; d = json.load(sys.stdin); print(d["ok"], d["check"], d["canonical_files_written"])'
 True True 0
 ```
 
 ```scrut {output_stream: stderr}
-$ $H/los-seal --capability route.patch --payload '{"unit_id": "unit-demo-l01", "route_id": "route-b2f1f80014860a929a3af0bc", "changes": {"vault_path": "material://source-demo-book/book.pdf"}}' --key s29-vault --request-id request-s29-vault --guards auto --out "$TMPDIR/s29-vault.json"
-seal_envelope: guards auto: module-demo=0, unit-demo-l01=3
+$ $H/los-seal --capability route.patch --payload '{"unit_id": "unit-demo-l01", "route_id": "route-b2f1f80014860a929a3af0bc", "changes": {"vault_path": "material://source-demo-book/lecture-01.pdf"}, "claim_evidence": {"claim_id": "covers:route-b2f1f80014860a929a3af0bc", "evidence": [{"kind": "quote", "ref": "material://source-demo-book/lecture-01.pdf", "page": 1, "text": "Expected value, page 1 of 24: an outcome is a value a variable can take"}]}}' --key s29-vault --request-id request-s29-vault --guards auto --out "$TMPDIR/s29-vault.json"
+seal_envelope: guards auto: file:operations/transactions/lineage.yaml=0, module-demo=0, unit-demo-l01=3
 ```
 
 ```scrut
@@ -67,7 +68,7 @@ $ los capability route.patch --payload-file "$TMPDIR/s29-vault.json"
   "replayed": false,
   "transaction_id": "transaction-20261001-090000-001",
   "receipt_path": "operations/transactions/transaction-20261001-090000-001.yaml",
-  "snapshot_after": "sha256:c3ca5d3b3434031ad0eca03a3e2737253e901cf796efc496a281fc0d6d2ed29b",
+  "snapshot_after": "sha256:8ba1f7c3115a998773450d9cc18d500add5a53f20ed3b5fe66e6c683e00fee99",
   "result": {
     "schema_version": 1,
     "unit_id": "unit-demo-l01",
@@ -75,18 +76,56 @@ $ los capability route.patch --payload-file "$TMPDIR/s29-vault.json"
     "changes": {
       "vault_path": {
         "before": null,
-        "after": "material://source-demo-book/book.pdf"
+        "after": "material://source-demo-book/lecture-01.pdf"
       }
     },
-    "plan_sha256": "sha256:5ac76f511c8e4156e5d6d3ef24139a0a61ec4092425843cb295abfa48e7cfca9",
+    "claim_anchors": [
+      {
+        "claim_id": "covers:route-b2f1f80014860a929a3af0bc",
+        "classification": "anchored",
+        "quotes": [
+          {
+            "ref": "material://source-demo-book/lecture-01.pdf",
+            "text": "Expected value, page 1 of 24: an outcome is a value a variable can take",
+            "page": 1,
+            "page_end": null,
+            "window": null,
+            "node": "",
+            "matched": true
+          }
+        ],
+        "bindings": [
+          {
+            "material": "material://source-demo-book/lecture-01.pdf",
+            "manifest": "source-demo-book/lecture-01.pdf",
+            "sha256": "395ded80ff4a721e2a91f400a3c6a3abd1f8d37e3c7f70b5ef42fa30d5264ea5",
+            "place": "p1",
+            "language": "en"
+          }
+        ]
+      }
+    ],
+    "claims": [
+      {
+        "claim_id": "covers:route-b2f1f80014860a929a3af0bc",
+        "before": "stale",
+        "after": "rejudged",
+        "warning": "",
+        "next": ""
+      }
+    ],
+    "plan_sha256": "sha256:4a6d555c125b058d145b32edd860e417e65947bd62f675389cc4111eac78eafb",
     "affected_files": [
-      "curriculum/modules/module-demo/source-map.yaml"
+      "curriculum/modules/module-demo/source-map.yaml",
+      "operations/transactions/lineage.yaml"
     ],
     "artifact_ids": [
+      "file:operations/transactions/lineage.yaml",
       "module-demo",
       "unit-demo-l01"
     ],
     "expected_revisions": {
+      "file:operations/transactions/lineage.yaml": 0,
       "module-demo": 0,
       "unit-demo-l01": 3
     },
@@ -94,10 +133,11 @@ $ los capability route.patch --payload-file "$TMPDIR/s29-vault.json"
     "transaction_id": "transaction-20261001-090000-001",
     "receipt_path": "operations/transactions/transaction-20261001-090000-001.yaml",
     "artifact_revisions": {
+      "file:operations/transactions/lineage.yaml": 1,
       "module-demo": 1,
       "unit-demo-l01": 4
     },
-    "snapshot_after": "sha256:c3ca5d3b3434031ad0eca03a3e2737253e901cf796efc496a281fc0d6d2ed29b",
+    "snapshot_after": "sha256:8ba1f7c3115a998773450d9cc18d500add5a53f20ed3b5fe66e6c683e00fee99",
     "replayed": false
   },
   "error": null
@@ -113,8 +153,8 @@ $ $H/los-assert-receipt --last --capability route.patch
 ## Observe the exact inspected bytes
 
 ```scrut
-$ MAT_SHA=$(sha256sum "$(dirname "$LOS_FX")/materials/source-demo-book/book.pdf" | cut -d' ' -f1) && echo "$MAT_SHA"
-61b4d4e33f928a4f6801ae74b3e940e0cfac1285aa4a958d46ce0ae142b49ed6
+$ MAT_SHA=$(sha256sum "$(dirname "$LOS_FX")/materials/source-demo-book/lecture-01.pdf" | cut -d' ' -f1) && echo "$MAT_SHA"
+395ded80ff4a721e2a91f400a3c6a3abd1f8d37e3c7f70b5ef42fa30d5264ea5
 ```
 
 ## Draft the replacement map outside the repository
@@ -173,7 +213,7 @@ $ export MAT_SHA && $LOS_REPO/.venv/bin/python - <<'EOF'
 >       "reviewed_on": "2026-10-12",
 >       "rationale": "The route understates the appendix table.",
 >       "fingerprint": fp2,
->       "evidence": [{"material_uri": "material://source-demo-book/book.pdf",
+>       "evidence": [{"material_uri": "material://source-demo-book/lecture-01.pdf",
 >         "file_sha256": "sha256:" + mat, "locator": "physical PDF pp. 1"}]}},
 >     {"kind": "watch", "label": "Demo companion video", "source_id": "source-demo-book"},
 >     {"id": "resource-demo-route-mirror", "kind": "read",
@@ -198,8 +238,8 @@ $ export MAT_SHA && $LOS_REPO/.venv/bin/python - <<'EOF'
 > open(os.environ["TMPDIR"] + "/map-l01-replace.yaml", "w").write(yaml.safe_dump(draft, sort_keys=False))
 > print("drafted map-l01-replace.yaml")
 > EOF
-fp1: sha256:9e9911adfc31be6a4fad9373c8d97e9800fdb42bc2417a3b9ff935fdd268be7a
-fp2: sha256:1c9d078927dba505c588f13735a4db105bbf1e5ceb2f40bed95abffb91a60978
+fp1: sha256:b21056feaeec6fd635522b55207a8e95668bfaa41de9439152c3d37dbf850d0f
+fp2: sha256:58df9cfa103de838dfb6fb11fdf4e25f7be525a95e1cb848bc098c2d1e9d0f01
 drafted map-l01-replace.yaml
 ```
 
@@ -209,7 +249,7 @@ drafted map-l01-replace.yaml
 $ los unit-map-import unit-demo-l01 --file "$TMPDIR/map-l01-replace.yaml" --replace --check | $LOS_REPO/.venv/bin/python -c 'import json,sys; d = json.load(sys.stdin); print(d["ok"], d["mode"], d["canonical_files_written"]); print(d["diff"]["replacement"], d["diff"]["stages_after"]); print(d["file_sha256"])'
 True check 0
 True ['stage-demo', 'stage-demo-pending']
-sha256:ce1990f0f7650c99b91501cf253a89a648bf460b546db52fe1e94680ebcfa2ee
+sha256:31ac987f75414ab831ac92f8013ace3b607aa1dae035358c08fc51c2b4613f56
 ```
 
 ## Seal the replacement with derived guards
@@ -224,7 +264,7 @@ $ los capability unit.map.import --payload-file "$TMPDIR/s29-replace.json" | $LO
 True apply transaction-20261001-090000-002
 study-map-demo-l01 True
 {"study-map-demo-l01": 1, "unit-demo-l01": 5}
-sha256:747bd8a6235881492ed30e0d8f603954a3958fe7ac900b381113424693de6e17
+sha256:554a117731a5cfd73fda91ea623558e564507e0ccf19cd4b7eec73ad4ddbe5a1
 ```
 
 ## The newest receipt names the capability

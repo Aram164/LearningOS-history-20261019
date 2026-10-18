@@ -203,7 +203,8 @@ repository/
 ├── generated/             gitignored, rebuildable; shape declared by manifest-contract.yaml
 ├── bases/                 installed Obsidian Bases shelves (ADR-006); gitignored
 ├── tools/                 the operator CLI and the learning_os package; see tools/README.md
-└── tests/                 the test suite and its frozen format fixtures
+├── tests/                 the test suite and its frozen format fixtures
+└── workbench/             published migration review documents and execution evidence; not learner data
 ```
 
 <!-- tree:end -->
