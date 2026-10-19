@@ -300,7 +300,7 @@ $ los unit-list --compact --module-id module-demo | $LOS_REPO/.venv/bin/python -
 
 ```scrut
 $ los intelligence-scan --brief --json | $LOS_REPO/.venv/bin/python -c 'import json,sys; d = json.load(sys.stdin); print(d["total_goals"], d["total_groups"], d["groups"][0]["detector"])'
-3 3 lineage-stale
+2 2 lineage-stale
 ```
 
 ## Search beyond note summaries, then read the saved reasoning

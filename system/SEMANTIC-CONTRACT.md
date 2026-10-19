@@ -101,6 +101,18 @@ transaction as the canonical mutation. Readers:
 `tools/learning_os/derive/semantics/lineage.py`, proven by
 `tests/test_semantic_lineage.py`.
 
+Prospective admission is shared by plan import, unit revision and evidence-bearing
+`route.patch`. Coverage or material identity changes require admitted evidence;
+unchanged claims may be rejudged only when stale, contested or exactly
+audit-defective, inside the selected unit. A ledger-only repair changes no
+unit/module bytes or revisions. Local claims require exact-file quotation
+presence (or an explicit digest-bound unreadable-place fallback), while remote
+claims remain explicitly unanchored. New judgments pin declared source material
+bindings as well as route, node and admitted evidence digests. Admission against
+proposed source patches uses the proposed registry and preserves previous local
+authority for downgrade checks. Quotations prove presence, not semantic support.
+Excerpts stay in external reviewed drafts/reports; lineage persists digests only.
+
 For prospective covers claims, stored revisions describe post-apply
 validity: only artifacts incremented by that transaction advance. Declared
 reads are checked against pre-apply state; the original guarded revisions
@@ -113,29 +125,65 @@ identify the actual review and its limits.
 ## Candidate goals (Phase 3)
 
 <!-- los:reference {"kind": "command", "text": "los goal"} -->
-The engine surfaces what is worth investigating and never mutates meaning
-itself. Six read-only detectors — covering routes gone stale, sources
-changed under claims, repeated question classes with no VOQ, inspections
-with no dossier, systematic reviewer corrections, judged claims still
-needing a reviewer — emit goals with rationale and evidence, thresholded
-and deduplicated. The sixth motivates the review predicates:
-`NeedsSourceReview` fires on its signals, `RequiresHumanJudgment` on its
-contested goals, and reviewers re-resolve moved authorities through
-`CurrentScopeAuthority`. Each goal then walks
-`detected → formulated → eligible → proposed → authorized → planned →
-executing → verified → closed` (plus `deferred/rejected/stale/superseded`),
-one step at a time; only Aram authorizes. The queue lives under
-`work/proposals/goals/`, one file per goal. Aram's explicit
-reject/defer/close decisions live separately in
-`operations/goal-ledger.yaml` (written only by `los goal`) and feed the
-detectors' `known_ids` dedup, so decided goals stop re-emitting. A deferred
-goal with an explicit `revisit_on` date reappears on that date as a candidate,
-never as an authorization. Goals
-sharing one cause print as one cluster (`cluster_goals`), ordered by a
-hand-written exam-proximity sort refined by detector precedence
-(`rank_clusters`: belief risk before fan-out size, `DETECTOR_PRECEDENCE`
-as tunable data) — a Select step, not a learned cost model. Readers:
-`tools/learning_os/derive/semantics/goals.py`, proven by
+
+Detectors propose investigations with rationale and evidence. Aram alone
+records explicit attention decisions through `los goal`: `authorized` means
+intent to act, never completion, and remains detectable. Reject requires a
+note. Reject, defer and close suppress that exact occurrence; a dated deferral
+reappears when due. The proposal lifecycle remains in
+`tools/learning_os/derive/semantics/goals.py`; decisions live in
+`operations/goal-ledger.yaml`.
+
+`tools/learning_os/derive/semantics/claim_status.py` owns claim interpretation
+for scans, admission and workflow reads. Lineage remains the sole freshness
+predicate. A judgment basis binds statement, evidence, judge and admission,
+excluding restamp/read shape. A stale occurrence additionally binds relevant
+current drift and blocking assumptions, excluding clocks, unrelated snapshots
+and read ordering. Full digests persist in IDs and records. Identical facts
+reuse a decision; different drift produces another occurrence.
+
+Evidence freshness is independent of optional audit enrichment. Ordinary plan
+inspection retains basic claim facts when audit storage is malformed and marks
+its audit membership `unavailable`, never clean or certified. An audit-dependent
+rejudgment, authorization or closure requires valid current audit evidence;
+complete audit-queue scans also refuse unavailable evidence rather than silently
+omit disputes or propose an unverified pool. One immutable goal-ledger
+observation feeds each scan, including ranking, hidden decisions and metrics.
+It is request-local only: a later write/check revalidates its own evidence and
+existing snapshot/revision guards, without trusting an earlier scan observation.
+
+One `lineage-stale` detector reports each stale claim, with causes and
+root-cause clustering. `claims-needing-review` reports contests and exact-basis
+audit defects, not every unreviewed claim. Supported fresh covers claims outside
+a clean audited population form the `claims-audit` pool. Unrecorded coverage
+is reported honestly and is excluded from audits; prior claims are not
+retroactively quotation-anchored.
+
+Audit authorization and results are immutable evidence in the ledger's separate
+`audits` map. Authorization freezes the complete eligible pool, full basis
+pairs and digest, one supplied system-random 256-bit seed, algorithm version
+and a reproducible sample of 30. The scan never draws a new sample. Closure
+binds that sample, actual reviewer, report bytes/digest and sampled defects;
+historical pairs must exist in lineage or its supersedes history. Rejecting or
+deferring attention preserves both audit records. Exact replay has no effects;
+redraw and conflicting closure refuse. A clean result certifies only its frozen
+pairs; a failed result certifies nothing. Defects remain attached to their exact
+basis until a reviewed repair creates a new basis. The same failed pool is not
+redrawn. Reviewer independence is an explicit attestation, not something a
+random seed proves.
+
+Attention quieting uses each occurrence's latest explicit non-deferred decision,
+up to 30 since `DETECTOR_RESETS`, ordered by date and ID. A detector becomes quiet
+at n >= 10 only if the Wilson 95% lower bound of rejected / (rejected +
+authorized + closed) exceeds 0.10. Brief groups and resume omit quiet detectors;
+full JSON retains their findings marked `quiet`, and route claim facts remain
+visible. Silent fixes supply no measurement. A deliberate detector change may
+reset its measurement window.
+
+Readers: `tools/learning_os/derive/semantics/goals.py`,
+`tools/learning_os/derive/semantics/claim_audits.py` and
+`tools/learning_os/derive/semantics/scan.py`. Tests:
+`tests/test_claim_status_audits.py`, `tests/test_intelligence_scan.py`,
 `tests/test_goal_proposals.py` and `tests/test_goal_select.py`.
 
 ## Agent tasks (Phase 4, amended: no tracking, no costs)
@@ -185,7 +233,7 @@ a cache file. Semantic dossiers live under `generated/dossiers/`, covered by
 the existing no-hand-edit path — no canonical file may reference them. Readers:
 `tools/learning_os/derive/semantics/dossiers.py`, proven by
 `tests/test_context_dossiers.py`. Served by the read-only
-`los dossier UNIT_ID` caller (`tools/learning_os/commands/dossier.py`,
+`los dossier UNIT_ID` caller (`tools/learning_os/app/handlers/resume.py`,
 proven by `tests/test_unit_dossier_command.py`).
 
 ## Proof-carrying change (Phase 6, hardened: claims, not verdicts)

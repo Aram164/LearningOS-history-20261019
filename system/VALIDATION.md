@@ -166,6 +166,13 @@ route, and the definitions they enforce are in `PLAN-CREATION-SOP.md`.
 - **W** `LOCATOR-VAGUE` — a book or paper route names a chapter but no page
   range; or a route of any format hedges ("selections", "topic-matched",
   "relevant") instead of naming the material.
+- **E** `ROUTE-LOCATOR-DUPLICATE` — distinct rich routes in one source/unit
+  group must have distinct explicit locators after whitespace normalization.
+  This is an authoring constraint, including intentionally overlapping material.
+- **E** `ROUTE-VAULT-LOCATOR-MISMATCH` — a route's locator names another
+  registered or sibling file while omitting its own `material://` vault filename.
+  Book locators that name only chapters/pages remain valid; matching normalizes
+  Unicode and case and checks complete filenames.
 - **W** `ROUTE-ANGLE-MISSING` — a rich route declares no `angle`.
 - **W** `ROUTE-ANGLE-DETAIL-MISSING` — a route has a one-line `angle` but no
   `angle_detail` for the hover.

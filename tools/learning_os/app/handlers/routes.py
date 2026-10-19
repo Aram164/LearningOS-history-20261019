@@ -6,6 +6,9 @@ import argparse
 import copy
 import hashlib
 import json
+from dataclasses import replace
+
+import yaml
 
 from learning_os.app._plan_gate import compose_plan_gate_errors as _compose_plan_gate_errors
 from learning_os.app._plan_gate import (
@@ -13,12 +16,20 @@ from learning_os.app._plan_gate import (
 )
 from learning_os.app._plan_gate import plan_apply_gate as _plan_apply_gate
 from learning_os.app._plan_gate import real_perimeter_errors as _real_perimeter_errors
+from learning_os.app.claim_admission import (
+    anchor_report,
+    lineage_artifacts,
+    prepare_claim_admission,
+    render_claim_lineage,
+)
 from learning_os.app.context import OpContext
 from learning_os.app.encoders import dumps_compact
 from learning_os.app.handlers._shared import guard_rows as _guard_rows
 from learning_os.app.handlers._shared import map_for_unit as _map_for_unit
 from learning_os.app.proposal import ResponsePayload, Result, TransactionProposal
 from learning_os.app.registry import register
+from learning_os.derive.semantics.claim_status import claim_impacts, observe_claims
+from learning_os.derive.semantics.lineage import LEDGER_RELATIVE
 from learning_os.domain.failures import NotFound, ValidationFailed, WriteRefused
 from learning_os.domain.material_refs import (
     MATERIAL_FIELDS,
@@ -32,6 +43,7 @@ from learning_os.domain.material_refs import (
 )
 from learning_os.domain.suggest import with_suggestions
 from learning_os.store.codec import dump_yaml as _dump_yaml
+from learning_os.store.contracts.gateway import current_gateway_request
 from learning_os.store.transactions import parse_expected_revisions
 from learning_os.store.warning_baseline import signatures_from_issues
 
@@ -47,14 +59,13 @@ def _apply_hint(args, capability, snapshot_id, revisions):
     """
     if capability != "route.patch":
         return None
+    payload = {"unit_id": args.unit_id, "route_id": args.route_id, "changes": args.changes}
+    if getattr(args, "claim_evidence", None) is not None:
+        payload["claim_evidence"] = args.claim_evidence
     return {
         "apply_via": "GatewayEnvelopeV2",
         "capability": capability,
-        "payload": {
-            "unit_id": args.unit_id,
-            "route_id": args.route_id,
-            "changes": args.changes,
-        },
+        "payload": payload,
         "expected_snapshot": snapshot_id,
         "expected_revisions": dict(revisions),
         "apply_how": ("direct CLI application is disabled; submit a "
@@ -278,13 +289,46 @@ def _execute_material_plan(ctx: OpContext, req: dict, capability: str,
         writes, artifacts, detail = planner(repo)
     except MaterialReferenceError as exc:
         raise WriteRefused(str(exc)) from exc
+    checking = req.get("check") is True
+    lineage_will_change = False
+    if capability == "route.patch":
+        unit = repo.units[req["unit_id"]]
+        source_map_path = repo.module_source_map_origins[unit.module_id]
+        proposed = (yaml.safe_load(writes[source_map_path]) if source_map_path in writes
+                    else repo.module_source_maps[unit.module_id])
+        supplied = req.get("claim_evidence")
+        if supplied is not None and (not isinstance(supplied, dict)
+                                    or supplied.get("claim_id") != "covers:" + req["route_id"]):
+            raise WriteRefused("claim_evidence must name exactly this route's covers claim",
+                               site="route.patch.lineage-preflight-failed", exit_code=1)
+        package = {"source_map": proposed, "claim_evidence": [supplied] if supplied is not None else []}
+        admission = prepare_claim_admission(root, repo, unit.module_id, package, unit_scope=unit.id)
+        if admission.problems:
+            raise WriteRefused("route patch lineage preflight failed; no canonical files were written",
+                               site="route.patch.lineage-preflight-failed", exit_code=1,
+                               extra_stderr=tuple("- " + problem for problem in admission.problems))
+        lineage_will_change = bool(admission.changed)
+        artifacts = set(lineage_artifacts(artifacts, lineage_will_change))
+        detail["claim_anchors"] = anchor_report(admission.evidence)
+        try:
+            before = observe_claims(root, repo=repo, route_ids=[req["route_id"]])
+        except ValueError as exc:
+            raise WriteRefused(f"cannot read claim impact: {exc}") from exc
+        after = {cid: replace(row, status="stale") if writes and row.status == "supported" else row
+                 for cid, row in before.items()}
+        detail["claims"] = claim_impacts(before, after, ["covers:" + rid for rid in admission.changed])
+
+        if lineage_will_change and not checking and current_gateway_request() is not None:
+            writes[root / LEDGER_RELATIVE] = render_claim_lineage(
+                root, repo, unit.module_id, package, admission.changed,
+                admission.evidence, admission.live_routes, incremented_artifacts=artifacts)
     rows = {p.relative_to(root).as_posix(): hashlib.sha256(v.encode()).hexdigest()
-            for p, v in sorted(writes.items())}
+            for p, v in sorted(writes.items()) if p != root / LEDGER_RELATIVE}
+    affected = sorted(set(rows) | ({LEDGER_RELATIVE} if lineage_will_change else set()))
     plan_hash = "sha256:" + hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
     result = {"schema_version": 1, **detail, "plan_sha256": plan_hash,
-              "affected_files": list(rows), "artifact_ids": sorted(artifacts),
+              "affected_files": affected, "artifact_ids": sorted(artifacts),
               "expected_revisions": _guard_rows(root, artifacts)}
-    checking = req.get("check") is True
     if req.get("plan_sha256") not in (None, plan_hash):
         raise WriteRefused("compaction plan changed; review the current plan")
     if not checking and capability == "module.materials.compact" and req.get("plan_sha256") is None:
@@ -299,7 +343,7 @@ def _execute_material_plan(ctx: OpContext, req: dict, capability: str,
         return Result(
             {"result": result, "capability": capability,
              "apply_args": {key: req.get(key)
-                            for key in ("unit_id", "route_id", "changes")}},
+                            for key in ("unit_id", "route_id", "changes", "claim_evidence")}},
             proposal=TransactionProposal(
                 capability=capability,
                 writes=writes,

@@ -30,6 +30,9 @@ from learning_os.app._plan_gate import (
 from learning_os.app._plan_gate import plan_apply_gate as _plan_apply_gate
 from learning_os.app.admin.masters_planning import prepare_master_promotion
 from learning_os.app.check import staged_shadow as _staged_shadow
+from learning_os.app.claim_admission import anchor_report, lineage_artifacts
+from learning_os.app.claim_admission import prepare_claim_admission as _phaseB_validate
+from learning_os.app.claim_admission import render_claim_lineage as _phaseB_ledger_text
 from learning_os.app.context import OpContext
 from learning_os.app.gateway import prepare_review_envelope
 from learning_os.app.gateway import read_content_bound_file as _read_content_bound_file
@@ -40,21 +43,11 @@ from learning_os.derive.masters_catalog import MastersPlanningError
 from learning_os.derive.material_synthesis import (
     MaterialSynthesisError,
     current_unit_material_basis,
-    publication_lineage_record,
     synthesis_destination,
 )
 from learning_os.derive.semantics.lineage import (
     LEDGER_RELATIVE,
-    NODE_CONTENT_PREFIX,
-    ROUTE_CONTENT_PREFIX,
     LineageError,
-    dump_ledger,
-    emit_route_covers,
-    load_ledger,
-    node_content_digest,
-    route_content_digest,
-    to_dict,
-    withdraw,
 )
 from learning_os.domain.failures import NotFound, RevisionConflict, WriteRefused
 from learning_os.domain.plan_import import ack_shape_problems as _ack_shape_problems
@@ -64,17 +57,12 @@ from learning_os.domain.plan_import import (
 )
 from learning_os.domain.plan_import import inventory_block as _inventory_block
 from learning_os.domain.plan_import import inventory_view as _inventory_view
-from learning_os.domain.plan_import import knowledge_node_rows as _knowledge_node_rows
 from learning_os.domain.plan_import import minimal_artifact_ids as _minimal_artifact_ids
 from learning_os.domain.plan_import import (
     module_plan_ordering_problems as _module_plan_ordering_problems,
 )
 from learning_os.domain.plan_import import (
     module_plan_routing_problems as _module_plan_routing_problems,
-)
-from learning_os.domain.plan_import import source_map_routes as _source_map_routes
-from learning_os.domain.plan_import import (
-    source_map_routes_with_source as _source_map_routes_with_source,
 )
 from learning_os.domain.plan_import import synthesis_entries as _synthesis_entries
 from learning_os.domain.render import replace_h2_section as _replace_h2_section
@@ -92,282 +80,6 @@ from learning_os.store.transactions import parse_expected_revisions
 # these helpers (repository reads, gateway context, report presentation)
 # moved verbatim from commands/module.py; the handlers convert the three
 # entries by SPEC 12 (R1 promotion/compact branches, R4 shared tail).
-
-
-_LINEAGE_EVIDENCE_KINDS = ("route-locator", "manifest", "repo-file", "external")
-
-def _materials_files(root: Path) -> dict:
-    try:
-        raw = yaml.safe_load(
-            (root / "records" / "materials-manifest.yaml").read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
-        return {}
-    files = raw.get("files") if isinstance(raw, dict) else None
-    return files if isinstance(files, dict) else {}
-
-def _phaseB_validate(root: Path, repo, module_id: str, package: dict):
-    problems = []
-    live_map = (repo.module_source_maps or {}).get(module_id) or {}
-    live_routes = _source_map_routes(live_map)
-    package_map = package.get("source_map")
-    package_routes = _source_map_routes(package_map) if package_map is not None else {}
-    changed = {}
-    if package_map is not None:
-        for rid, route in sorted(package_routes.items()):
-            old = live_routes.get(rid)
-            new_covers = [str(node) for node in (route.get("covers") or [])]
-            if old is None:
-                if new_covers:
-                    changed[rid] = new_covers
-            elif sorted(str(node) for node in (old.get("covers") or [])) != sorted(new_covers):
-                changed[rid] = new_covers
-        # Deleting the route deletes its covers claim too. Include removals
-        # even when there is no added/edited route to trigger ledger handling.
-        for rid in sorted(set(live_routes) - set(package_routes)):
-            if live_routes[rid].get("covers"):
-                changed[rid] = []
-    raw_evidence = package.get("claim_evidence", [])
-    if raw_evidence is None:
-        raw_evidence = []
-    if not isinstance(raw_evidence, list):
-        return (["claim_evidence must be a list of per-claim evidence maps"], {}, {}, live_routes)
-    evidence_by_claim = {}
-    for index, entry in enumerate(raw_evidence):
-        label = f"claim_evidence[{index}]"
-        if not isinstance(entry, dict):
-            problems.append(f"{label} must be a mapping")
-            continue
-        claim_id = entry.get("claim_id")
-        if not isinstance(claim_id, str) or not claim_id.strip():
-            problems.append(f"{label} needs a non-empty claim_id")
-            continue
-        if claim_id in evidence_by_claim:
-            problems.append(f"{label} repeats claim {claim_id!r}")
-            continue
-        items = entry.get("evidence")
-        if not isinstance(items, list) or not items:
-            problems.append(f"{label} needs a non-empty evidence list")
-            continue
-        reads = entry.get("reads", {})
-        if reads is None:
-            reads = {}
-        if not isinstance(reads, dict):
-            problems.append(f"{label} reads must be a mapping")
-            continue
-        evidence_by_claim[claim_id] = {"evidence": items, "reads": reads}
-    for rid in sorted(changed):
-        claim_id = "covers:" + rid
-        if claim_id not in evidence_by_claim:
-            problems.append(
-                f"route {rid} changes covers without claim evidence; Phase B "
-                f"requires admitted evidence for {claim_id}")
-    for claim_id in sorted(evidence_by_claim):
-        if not claim_id.startswith("covers:") or claim_id[7:] not in changed:
-            problems.append(
-                f"claim evidence names {claim_id!r}, which this package does not "
-                "change; lineage is prospective only, never backfill")
-    if problems:
-        return (problems, {}, {}, live_routes)
-    try:
-        current_revisions = load_revisions(root)
-    except (OSError, ValueError) as exc:
-        return ([f"cannot read revision ledger: {exc}"], {}, {}, live_routes)
-    manifest_files = _materials_files(root)
-    for claim_id in sorted(evidence_by_claim):
-        rid = claim_id[7:]
-        route = package_routes.get(rid, live_routes.get(rid)) or {}
-        locator = str(route.get("locator") or "")
-        for item in evidence_by_claim[claim_id]["evidence"]:
-            problems.extend(_phaseB_check_item(claim_id, item, locator, manifest_files, root))
-        for artifact, revision in sorted(evidence_by_claim[claim_id]["reads"].items()):
-            try:
-                declared = int(revision)
-            except (TypeError, ValueError):
-                problems.append(f"{claim_id} declares malformed revision for {artifact!r}")
-                continue
-            if artifact not in current_revisions:
-                problems.append(f"{claim_id} reads unknown artifact {artifact!r}")
-            elif current_revisions[artifact] != declared:
-                problems.append(
-                    f"{claim_id} reads stale revision of {artifact!r}: package saw "
-                    f"{declared}, current is {current_revisions[artifact]}")
-    if problems:
-        return (problems, {}, {}, live_routes)
-    return ([], changed, evidence_by_claim, live_routes)
-
-def _phaseB_check_item(claim_id, item, locator, manifest_files, root):
-    if not isinstance(item, dict):
-        return [f"{claim_id} evidence entries must be mappings"]
-    kind = item.get("kind")
-    ref = item.get("ref")
-    if kind not in _LINEAGE_EVIDENCE_KINDS:
-        return [f"{claim_id} cites unknown evidence kind {kind!r}"]
-    if not isinstance(ref, str) or not ref.strip():
-        return [f"{claim_id} evidence needs a non-empty ref"]
-    if kind == "route-locator":
-        if ref not in locator:
-            return [f"{claim_id} cites route-locator text absent from the recorded locator"]
-    elif kind == "manifest":
-        if ref not in manifest_files:
-            return [f"{claim_id} cites unregistered manifest path {ref!r}"]
-        entry = manifest_files[ref]
-        digest = entry.get("sha256") if isinstance(entry, dict) else None
-        if not isinstance(digest, str) or not digest.strip():
-            return [f"{claim_id} cites manifest path {ref!r} with no digest"]
-    elif kind == "repo-file":
-        try:
-            candidate = (root / ref).resolve()
-            inside = candidate == root.resolve() or root.resolve() in candidate.parents
-        except (OSError, ValueError):
-            inside = False
-        if not inside or not candidate.is_file():
-            return [f"{claim_id} cites unreadable repo file {ref!r}"]
-    elif kind == "external":
-        if not ref.startswith(("http://", "https://")):
-            return [f"{claim_id} external evidence must be an http(s) URL"]
-        if not isinstance(item.get("note"), str) or not str(item.get("note")).strip():
-            return [f"{claim_id} external evidence needs its verification trail in note"]
-    return []
-
-def _phaseB_ledger_text(root, repo, module_id, package, changed, evidence_by_claim, live_routes,
-                       incremented_artifacts=None, synthesis_entries=()):
-    request = current_gateway_request()
-    if request is None:
-        raise LineageError("prospective lineage needs gateway admission context")
-    judged_by = f"{request.channel}/{request.approval_kind}"
-    admitted = {"request_id": request.request_id, "idempotency_key": request.idempotency_key}
-    try:
-        current_revisions = load_revisions(root)
-    except (OSError, ValueError) as exc:
-        raise LineageError(f"cannot read revision ledger: {exc}") from exc
-    manifest_files = _materials_files(root)
-    records = dict(load_ledger(root))
-    package_routes = _source_map_routes(package.get("source_map"))
-    # Post-apply route rows with ownership: the package row when this import
-    # carries the route, else the live row (a deletion still emits before
-    # its withdrawal below). Package unit rows likewise override live rows,
-    # so covered-node digests describe post-apply validity.
-    live_map = (getattr(repo, "module_source_maps", {}) or {}).get(module_id) or {}
-    package_owned = _source_map_routes_with_source(package.get("source_map"))
-    live_owned = _source_map_routes_with_source(live_map)
-    post_apply_nodes: dict = {}
-    for unit in (getattr(repo, "units", {}) or {}).values():
-        post_apply_nodes.update(_knowledge_node_rows(getattr(unit, "data", None)))
-    # Post-apply stamping: the gateway increments exactly module_id and the
-    # units supplied in the package (see cmd_module_plan_import artifact_ids).
-    # Declared reads store post-apply validity for those artifacts so the new
-    # claim is supported immediately after its own commit. Nothing else is
-    # stamped: each covers claim reads its own route row plus its covered
-    # nodes (content digests below), never the module revision and never
-    # co-imported units or learner state.
-    package_unit_ids = set()
-    for entry in package.get("units", []) or []:
-        unit_data = entry.get("unit") if isinstance(entry, dict) else None
-        uid = unit_data.get("id") if isinstance(unit_data, dict) else None
-        if isinstance(uid, str) and uid \
-                and unit_data.get("module_id") == module_id:
-            package_unit_ids.add(uid)
-        if isinstance(unit_data, dict):
-            post_apply_nodes.update(_knowledge_node_rows(unit_data))
-    incremented = ({module_id} | package_unit_ids) if incremented_artifacts is None \
-        else set(incremented_artifacts)
-    for rid in sorted(changed):
-        claim_id = "covers:" + rid
-        trails = []
-        digests = {}
-        for item in evidence_by_claim[claim_id]["evidence"]:
-            ref = str(item["ref"])
-            trail = "{}:{}".format(item["kind"], ref)
-            note = item.get("note")
-            if isinstance(note, str) and note.strip():
-                trail += f" -- trail: {note.strip()}"
-            trails.append(trail)
-            if item["kind"] == "manifest":
-                entry = manifest_files.get(ref)
-                digest = str(entry.get("sha256") or "") \
-                    if isinstance(entry, dict) else ""
-                if not digest:
-                    raise LineageError(
-                        f"{claim_id} cites manifest path {ref!r} with no digest")
-                digests["manifest:" + ref] = digest
-            elif item["kind"] == "repo-file":
-                try:
-                    candidate = (root / ref).resolve()
-                    inside = candidate == root.resolve() \
-                        or root.resolve() in candidate.parents
-                except (OSError, ValueError):
-                    inside = False
-                    candidate = None
-                if not inside or candidate is None or not candidate.is_file():
-                    raise LineageError(
-                        f"{claim_id} cites unreadable repo file {ref!r}")
-                try:
-                    content = candidate.read_bytes()
-                except OSError as exc:
-                    raise LineageError(
-                        f"{claim_id} cites unreadable repo file {ref!r}: "
-                        f"{exc}") from exc
-                digests["file:" + ref] = "sha256:" + hashlib.sha256(
-                    content).hexdigest()
-        try:
-            declared = {
-                str(artifact): int(revision)
-                for artifact, revision
-                in dict(evidence_by_claim[claim_id].get("reads") or {}).items()
-            }
-        except (TypeError, ValueError) as exc:
-            raise LineageError(
-                f"{claim_id} declares malformed revision: {exc}") from exc
-        # Declared reads were validated fresh against pre-commit state;
-        # store post-apply validity for incremented artifacts so the new
-        # claim is supported immediately after its own commit.
-        read_revisions = {}
-        for artifact, revision in declared.items():
-            if artifact in incremented:
-                read_revisions[artifact] = current_revisions.get(artifact, 0) + 1
-            else:
-                read_revisions[artifact] = revision
-        # The judgment's own reads: this route's row plus the nodes it
-        # covers. A covered node without a post-apply row earns no key —
-        # canonical validation owns covers resolvability, and the ledger
-        # never invents a digest for a row that is not there.
-        owned = package_owned.get(rid) or live_owned.get(rid)
-        if owned is not None:
-            source_id, route_row = owned
-            digests[ROUTE_CONTENT_PREFIX + rid] = route_content_digest(
-                module_id=module_id, source_id=source_id, route=route_row)
-        for node_id in changed[rid]:
-            node_row = post_apply_nodes.get(str(node_id))
-            if node_row is not None:
-                digests[NODE_CONTENT_PREFIX + str(node_id)] = node_content_digest(
-                    node_row)
-        prior = records.get(claim_id)
-        records[claim_id] = emit_route_covers(
-            route_id=rid,
-            covers=changed[rid],
-            read_revisions=read_revisions,
-            judged_by=judged_by,
-            admitted_by=admitted,
-            evidence=trails,
-            supersedes=to_dict(prior) if prior is not None else None,
-            source_hashes=digests,
-        )
-    live_ids = set(live_routes)
-    package_ids = set(package_routes)
-    for rid in sorted(live_ids - package_ids):
-        claim_id = "covers:" + rid
-        if claim_id in records:
-            for lineage in withdraw(list(records.values()), claim_id):
-                records[lineage.claim_id] = lineage
-    for unit_id, dossier in synthesis_entries:
-        content = _dump_yaml(dossier)
-        destination = synthesis_destination(root, unit_id)
-        if destination.is_file() and destination.read_bytes() == content.encode("utf-8"):
-            continue
-        claim_id = f"dossier:{dossier['id']}"
-        records[claim_id] = publication_lineage_record(
-            root, unit_id, dossier, content, request, prior=records.get(claim_id))
-    return dump_ledger(records)
 
 
 def _observed_material_binding(root: Path, contract: dict) -> tuple[dict | None, list[str]]:
@@ -909,7 +621,8 @@ def _execute_plan_import(ctx, req, *, module_id, source, package_bytes,
             extra=tuple(f"- {problem}" for problem in routing_problems),
         )
     lineage_problems, changed_claims, claim_evidence, live_routes = _phaseB_validate(
-        root, repo, module_id, package)
+        root, repo, module_id, package,
+        unit_scope=req.get("unit_id") if capability_override == "unit.plan.revise" else None)
     if lineage_problems:
         _plan_refuse(
             ctx,
@@ -918,7 +631,10 @@ def _execute_plan_import(ctx, req, *, module_id, source, package_bytes,
             exit_code=1,
             extra=tuple(f"- {problem}" for problem in lineage_problems),
         )
-    if not req.get("check") and (changed_claims or synthesis_entries):
+    lineage_will_change = bool(changed_claims) or any(
+        synthesis_destination(root, uid) in _drop_unchanged_writes(writes)
+        for uid, _ in synthesis_entries)
+    if not req.get("check") and lineage_will_change:
         try:
             writes[root / LEDGER_RELATIVE] = _phaseB_ledger_text(
                 root, repo, module_id, package,
@@ -979,22 +695,24 @@ def _execute_plan_import(ctx, req, *, module_id, source, package_bytes,
             root, module_id, package, writes,
             synthesis_entries, package_sha, seen_units)
         result["units_checked"] = sorted(seen_units)
-        result["files_checked"] = len(writes)
+        result["files_checked"] = len(writes) + int(lineage_will_change)
         capability = capability_override or "module.plan.import"
         reviewed_sha = review_input[0] if review_input else package_sha
         payload = review_input[1] if review_input else {
             "module_id": module_id, "file": str(source), "file_sha256": package_sha}
         owners = result["commit_artifact_ids"] if minimal_writes \
             else [module_id, *sorted(seen_units), *synthesis_ids]
+        owners = lineage_artifacts(owners, lineage_will_change)
         result["expected_revisions"] = {aid: load_revisions(root).get(aid, 0) for aid in owners}
         result["commit_artifact_ids"] = owners
         result["reviewed_file_sha256"] = reviewed_sha
         result["assembled_package_sha256"] = package_sha
         result["capability"] = capability
-        result["changes"] = "present" if writes else "none"
+        result["changes"] = "present" if writes or lineage_will_change else "none"
         result["expected_write_paths"] = sorted({
             str(p.relative_to(root)) for p in writes
-        } | ({LEDGER_RELATIVE} if changed_claims or synthesis_entries else set()))
+        } | ({LEDGER_RELATIVE} if lineage_will_change else set()))
+        result["claim_anchors"] = anchor_report(claim_evidence)
         result["expected_write_sha256"] = {
             str(p.relative_to(root)): hashlib.sha256(content.encode("utf-8")).hexdigest()
             for p, content in writes.items()}
@@ -1032,6 +750,7 @@ def _execute_plan_import(ctx, req, *, module_id, source, package_bytes,
             root, module_id, writes, synthesis_entries)
     else:
         artifact_ids = [module_id, *sorted(seen_units), *synthesis_ids]
+    artifact_ids = lineage_artifacts(artifact_ids, lineage_will_change)
     validate_extra, gate_errors = _plan_apply_gate(
         root, live_repo=repo, module_id=module_id,
         syntheses=synthesis_entries,

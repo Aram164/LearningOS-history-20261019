@@ -48,7 +48,9 @@ sys.path.insert(0, str(TOOLS))
 
 from learning_os.app.gateway import context_from_v2 as _context_from_v2  # noqa: E402
 from learning_os.app.gateway import read_structured_file as _read_structured_file  # noqa: E402
-from learning_os.app.gateway import validate_capability_envelope as _validate_capability_envelope  # noqa: E402
+from learning_os.app.gateway import (  # noqa: E402
+    validate_capability_envelope as _validate_capability_envelope,
+)
 from learning_os.app.gateway import validate_payload as _validate_payload  # noqa: E402
 from learning_os.app.lock import operator_lock as _operator_lock  # noqa: E402
 from learning_os.derive.material_synthesis import (  # noqa: E402
@@ -184,7 +186,10 @@ def verify(root: Path, args) -> int:
         raise ValueError("receipt writes do not match the preflight")
     receipt_hashes = {row["path"]: row["sha256_after"] for row in receipt["writes"]}
     expected_hashes = report.get("expected_write_sha256")
-    if not isinstance(expected_hashes, dict) or not expected_hashes \
+    ledger_only = (written_paths == {"operations/transactions/lineage.yaml"}
+                   and set(expected) == {"file:operations/transactions/lineage.yaml"}
+                   and receipt.get("capability") in {"unit.plan.revise", "module.plan.import"})
+    if not isinstance(expected_hashes, dict) or (not expected_hashes and not ledger_only) \
             or set(expected_hashes) != written_paths - {"operations/transactions/lineage.yaml"} \
             or any(receipt_hashes.get(path) != digest for path, digest in expected_hashes.items()):
         raise ValueError("receipt final bytes do not match the preflight")

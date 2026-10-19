@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -34,6 +35,20 @@ class ResolvedMaterialFile(NamedTuple):
     path: Path
 
 MATERIAL_SCHEME = "material://"
+
+
+def materials_mount(repo: Repo) -> tuple[Path | None, str]:
+    """The shared mounted/readable predicate used by validation and admission."""
+    physical = repo.learningos_root / "materials"
+    try:
+        tree = physical.resolve(strict=True) if physical.is_symlink() else physical
+    except (OSError, RuntimeError):
+        return None, f"materials symlink at {physical} points nowhere"
+    if not tree.is_dir():
+        return None, f"materials tree not mounted at {physical}"
+    if not os.access(tree, os.R_OK | os.X_OK):
+        return None, f"materials tree at {physical} is not readable"
+    return tree, ""
 
 MATERIAL_RESOURCE_SUFFIXES = frozenset({
     ".ipynb",

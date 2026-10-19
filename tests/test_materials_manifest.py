@@ -373,7 +373,7 @@ def test_symlinked_materials_root_keeps_inner_aliases_inside_its_target(mini_rep
 
 
 def test_unreadable_symlinked_materials_target_warns_offline(mini_repo, monkeypatch):
-    from learning_os.derive.validation import materials
+    from learning_os.store.materials import resolution as materials
 
     link = mini_repo.parent / "materials"
     link.rmdir()

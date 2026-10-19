@@ -16,6 +16,7 @@ import pytest
 from repo_builders import run_los
 
 from learning_os.derive.semantics import ScanInput, scan_observations
+from learning_os.derive.semantics.claim_status import ClaimStatus
 from learning_os.derive.semantics.goals import (
     DETECTOR_PRECEDENCE,
     GoalCluster,
@@ -251,11 +252,11 @@ def test_known_ids_dedup_fed_goals():
 def test_empty_feed_matches_no_feed_exactly():
     bare = scan_observations(ScanInput(
         obligations=("unit-a",),
-        stale_claims=(("claim-x", ("rev:y",)),),
+        claims=(ClaimStatus("claim-x", "stale", "a"*64, "b"*64, moved=("rev:y",)),),
     ))
     fed_empty = scan_observations(ScanInput(
         obligations=("unit-a",),
-        stale_claims=(("claim-x", ("rev:y",)),),
+        claims=(ClaimStatus("claim-x", "stale", "a"*64, "b"*64, moved=("rev:y",)),),
         **feed_scan_kwargs(parse_feed({})),
     ))
     assert fed_empty == bare
@@ -285,8 +286,7 @@ def test_precedence_covers_every_known_detector():
         "claims-needing-review",
         "lineage-stale",
         "evidence-superseded",
-        "source-changed-under-claim",
-        "covering-routes-stale",
+        "claims-audit",
         "study-map-obligation",
         "reviewer-correction-pattern",
         "repeated-question-gap",
@@ -295,10 +295,10 @@ def test_precedence_covers_every_known_detector():
 
 
 def test_precedence_orders_every_known_detector():
-    detectors = ["inspection-without-dossier", "covering-routes-stale",
+    detectors = ["inspection-without-dossier", "claims-audit",
                  "lineage-stale", "claims-needing-review",
                  "study-map-obligation", "evidence-superseded",
-                 "source-changed-under-claim", "repeated-question-gap",
+                 "repeated-question-gap",
                  "reviewer-correction-pattern"]
     clusters = [_ranked_cluster(f"c-{detector}", detector, f"g-{detector}")
                 for detector in detectors]
@@ -308,8 +308,7 @@ def test_precedence_orders_every_known_detector():
         "claims-needing-review",
         "lineage-stale",
         "evidence-superseded",
-        "source-changed-under-claim",
-        "covering-routes-stale",
+        "claims-audit",
         "study-map-obligation",
         "reviewer-correction-pattern",
         "repeated-question-gap",

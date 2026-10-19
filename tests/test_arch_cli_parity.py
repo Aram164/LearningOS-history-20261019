@@ -5,6 +5,7 @@ Also enforces ``system/contracts/cli-operations.yaml`` (SPEC 10.8).
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import copy
 import io
@@ -585,6 +586,47 @@ def test_capability_schema_check_passes():
     assert generate_capability_schemas.main(["--check"]) == 0, FIX
 
 
+def _normalize_claim_surface_observation(parser, argv, recorded):
+    """Keep old-source observations; account only for the three added fields.
+
+    Changed command declarations own their usage prefix. Error bodies, exits,
+    stdout and all historical argument values remain exact.
+    """
+    result = copy.deepcopy(recorded)
+    command = argv[0] if argv else ""
+    additions = {"goal": {"authorize": False, "audit_file": None},
+                 "route-patch": {"claim_evidence": None}}
+    if command not in additions:
+        return result
+    if "namespace" in result:
+        for name, default in additions[command].items():
+            assert name not in result["namespace"], (command, name)
+            result["namespace"][name] = default
+    elif command == "goal":
+        frozen_error_cases = {
+            ("goal", "X", "--reject", "--reject", "--defer"),
+            ("goal", "X", "--reject", "--reviewed-sha256", "ab" * 32),
+        }
+        assert tuple(argv) in frozen_error_cases
+        prefix, separator, body = result["error"]["stderr"].partition("los goal: error:")
+        assert separator and prefix.startswith("usage: los goal")
+        action = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+        usage = action.choices[command].format_usage()
+        result["error"]["stderr"] = usage + separator + body
+        result["error"]["first_line"] = usage.strip().splitlines()[0]
+    return result
+
+
+@pytest.mark.parametrize("argv,field,value", [
+    (["goal", "lineage-stale:covers:route-demo@" + "a"*64, "--authorize"], "authorize", True),
+    (["goal", "claims-audit:" + "a"*64, "--close", "--audit-file", "/scratch/audit.yaml", "--check"], "audit_file", "/scratch/audit.yaml"),
+    (["route-patch", "unit-demo", "route-demo", "--changes", "{}", "--claim-evidence", "{}", "--check"], "claim_evidence", {}),
+])
+def test_claim_surface_additions_parse_without_rewriting_historical_corpus(argv, field, value):
+    import los
+    assert _run(los.build_parser(), argv)["namespace"][field] == value
+
+
 def test_actual_old_source_supplement_parity():
     """Additional old-source observations retain full stdout and stderr."""
     import los
@@ -602,4 +644,5 @@ def test_actual_old_source_supplement_parity():
             if handler and handler.startswith("learning_os.adapters.cli.invoke:"):
                 namespace = _normalize_registered_namespace(namespace, handler)
             recorded["namespace"] = namespace
+        recorded = _normalize_claim_surface_observation(parser, row["argv"], recorded)
         assert _run(parser, row["argv"]) == recorded, row["source"]

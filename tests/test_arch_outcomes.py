@@ -359,8 +359,8 @@ def _resolved_or_none(exc, context):
 
 def test_table_contexts_are_complete():
     assert [row.context for row in TABLE] == (
-        ["gateway.refusal"] * 11 + ["gateway.replay"] * 4
-        + ["gateway.dispatch"] * 8 + ["cli"] * 7)
+        ["gateway.refusal"] * 12 + ["gateway.replay"] * 4
+        + ["gateway.dispatch"] * 9 + ["cli"] * 7)
 
 
 def test_refusal_rows_match_old_helper():
@@ -432,8 +432,10 @@ def test_replaced_helpers_match_old_copies():
             assert stripped == old, exc
         else:
             assert new == old, exc
+    from learning_os.domain.failures import Refusal
+
     assert _classify_failure(2, "m", failure=None,
-                             refusal=("STALE_SNAPSHOT", True)) == (
+                             refusal=Refusal("STALE_SNAPSHOT", True)) == (
         _old_classify_failure(2, "m", failure=None,
                               refusal=("STALE_SNAPSHOT", True)))
     for rollback_complete in (True, False):

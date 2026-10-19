@@ -126,8 +126,15 @@ def _receipts_for_run(root: str | None) -> list[tuple[str, set[str]]]:
 
 def _owner_satisfied(entry: dict, record: dict, rel: str,
                      receipts: list[tuple[str, set[str]]]) -> bool:
+    import arch_audit_hook
+
+    writer = record.get("writer")
+    if writer in arch_audit_hook.MECHANICAL_HELPERS:
+        semantic_owner = record.get("delegated_owner")
+        if semantic_owner not in arch_audit_hook.MECHANICAL_HELPERS[writer]:
+            return False
+        writer = semantic_owner
     if entry["sink"] == "module":
-        writer = record.get("writer")
         if not isinstance(writer, str) or not writer:
             return False
         owner = entry["owner"]
@@ -135,6 +142,8 @@ def _owner_satisfied(entry: dict, record: dict, rel: str,
     # engine:apply: apply phase plus a same-run receipt for this path
     # naming one of the declared capabilities.
     if record.get("phase") != "apply":
+        return False
+    if writer != "learning_os.store.transactions":
         return False
     declared = set(entry.get("capabilities", []))
     return any(capability in declared and rel in writes
@@ -405,6 +414,43 @@ def test_engine_apply_needs_declared_capability_receipt(tmp_path):
         _write_record(path, "learning_os.store.transactions", phase="apply"),
     ], receipts=wrong)
     assert len(sigs) == 1 and "lineage.yaml" in next(iter(sigs))
+
+
+def test_engine_phase_cannot_authorize_a_hidden_callback_writer(tmp_path):
+    proof = {"capability": "lineage.restamp",
+             "writes": [{"path": "operations/transactions/lineage.yaml"}]}
+    assert _signatures(tmp_path, [_write_record(
+        "/w/operations/transactions/lineage.yaml", "learning_os.app.handlers.plan",
+        phase="apply")], receipts=proof)
+
+
+def test_mechanical_delegation_is_bounded_to_the_immediate_caller(tmp_path):
+    import arch_audit_hook
+
+    helper = "learning_os.store.durable_fs"
+    engine = "learning_os.store.transactions"
+    frames = [(helper, "helper.py", 1), (helper, "helper.py", 2), (engine, "engine.py", 3)]
+    assert arch_audit_hook.delegated_owner(frames) == engine
+    frames.insert(2, ("learning_os.app.handlers.plan", "callback.py", 4))
+    assert arch_audit_hook.delegated_owner(frames) is None
+    record = _write_record("/w/operations/transactions/revisions.yaml", helper, phase="apply")
+    assert _signatures(tmp_path, [record])
+    assert not _signatures(tmp_path, [dict(record, delegated_owner=engine)])
+
+
+def test_helper_declaration_matches_the_hook():
+    import arch_audit_hook
+
+    assert {row["module"]: frozenset(row["callers"]) for row in _load_owners()["io_helpers"]} == (
+        arch_audit_hook.MECHANICAL_HELPERS)
+
+
+def test_source_revision_is_a_declared_lineage_writer(tmp_path):
+    proof = {"capability": "source.record.revise",
+             "writes": [{"path": "operations/transactions/lineage.yaml"}]}
+    assert not _signatures(tmp_path, [_write_record(
+        "/w/operations/transactions/lineage.yaml", "learning_os.store.transactions",
+        phase="apply")], receipts=proof)
 
 
 def test_missing_writer_and_excluded_and_rename(tmp_path):

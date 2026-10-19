@@ -197,10 +197,12 @@ def test_genuine_refusal_types_keep_their_codes():
 
 def test_carried_refusal_wins_over_nothing_else():
     """A handler-recorded code crosses the boundary; prose never overrides."""
+    from learning_os.domain.failures import Refusal
+
     error = _classify_failure(
         3,
         "artifact revision conflict — reload the affected record before writing",
-        refusal=("REVISION_CONFLICT", True),
+        refusal=Refusal("REVISION_CONFLICT", True),
     )
     assert error["code"] == "REVISION_CONFLICT"
     assert error["retryable"] is True

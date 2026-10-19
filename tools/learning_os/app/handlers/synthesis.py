@@ -7,6 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from learning_os.app.claim_admission import lineage_artifacts
 from learning_os.app.context import OpContext
 from learning_os.app.encoders import dumps_indented
 from learning_os.app.gateway import prepare_review_envelope
@@ -71,10 +72,12 @@ def unit_material_synthesis_publish(ctx: OpContext, req: dict) -> Result:
     value = _input_record(req, "unit material synthesis")
     _validate_publication_synthesis(root, req["unit_id"], value)
     basis = current_unit_material_basis(root, req["unit_id"])
+    artifacts = lineage_artifacts((req["unit_id"], value["id"]))
     if req.get("check") is True:
         return Result(
             {"ok": True, "check": True, "unit_id": req["unit_id"],
-             "basis": basis},
+             "basis": basis, "artifact_ids": artifacts,
+             "expected_revisions": {aid: load_revisions(root).get(aid, 0) for aid in artifacts}},
 
         )
     if not req.get("approve"):
@@ -116,7 +119,7 @@ def unit_material_synthesis_publish(ctx: OpContext, req: dict) -> Result:
         proposal=TransactionProposal(
             capability="unit.material-synthesis.publish",
             writes={destination: content, root / LEDGER_RELATIVE: lineage},
-            artifact_ids=(req["unit_id"], value["id"]),
+            artifact_ids=tuple(artifacts),
             expected_revisions=expected_revisions,
         ),
 

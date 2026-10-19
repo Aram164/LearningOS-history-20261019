@@ -22,132 +22,39 @@ LOS = Path(__file__).resolve().parent.parent / "tools" / "los.py"
 
 
 def _input(**overrides):
-    fields = {
-        "route_covers": (),
-        "route_digest_pins": (),
-        "live_route_digests": (),
-        "route_revision_pins": (),
-        "current_revisions": (),
-        "node_digest_pins": (),
-        "live_node_digests": (),
-        "claim_statuses": (),
-        "stale_claims": (),
-        "obligations": (),
-        "known_ids": (),
-    }
-    fields.update(overrides)
-    return ScanInput(**fields)
+    return ScanInput(**overrides)
 
 
 def test_empty_observations_propose_nothing():
     assert scan_observations(_input()) == ()
 
 
-def test_moved_node_digests_reach_covering_routes():
-    goals = scan_observations(_input(
-        route_covers=(("route-1", ("knowledge-a", "knowledge-b")),),
-        node_digest_pins=(("route-1", (("knowledge-a", "sha256:old"),
-                                       ("knowledge-b", "sha256:kept"))),),
-        live_node_digests=(("knowledge-a", "sha256:new"),
-                            ("knowledge-b", "sha256:kept")),
-        claim_statuses=(("covers:route-1", "supported"),),
-    ))
-    assert [(goal.goal_id, goal.detector) for goal in goals] == [
-        ("covering-routes-stale:route-1", "covering-routes-stale")]
-    assert goals[0].state == "detected"
-
-
-def test_covering_routes_evidence_names_the_moved_unit():
-    goals = scan_observations(_input(
-        route_covers=(("route-1", ("knowledge-a",)),),
-        node_digest_pins=(("route-1", (("knowledge-a", "sha256:old"),)),),
-        live_node_digests=(("knowledge-a", "sha256:new"),),
-        claim_statuses=(("covers:route-1", "supported"),),
-        node_units=(("knowledge-a", "unit-x"),),
-    ))
-    (goal,) = goals
-    assert goal.evidence == (
-        "route:route-1", "node:knowledge-a", "unit:unit-x")
-
-
-def test_covering_routes_emit_without_a_unit_map():
-    goals = scan_observations(_input(
-        route_covers=(("route-1", ("knowledge-a",)),),
-        node_digest_pins=(("route-1", (("knowledge-a", "sha256:old"),)),),
-        live_node_digests=(("knowledge-a", "sha256:new"),),
-        claim_statuses=(("covers:route-1", "supported"),),
-    ))
-    (goal,) = goals
-    assert goal.evidence == ("route:route-1", "node:knowledge-a")
-
-
-def test_moved_route_rows_reach_their_claim():
-    goals = scan_observations(_input(
-        route_digest_pins=(("route-1", "sha256:old"),),
-        live_route_digests=(("route-1", "sha256:new"),),
-        claim_statuses=(("covers:route-1", "supported"),),
-    ))
-    assert [(goal.goal_id, goal.detector) for goal in goals] == [
-        ("source-changed-under-claim:covers:route-1",
-         "source-changed-under-claim")]
-
-
-def test_moved_revisions_reach_old_shape_claims():
-    goals = scan_observations(_input(
-        route_revision_pins=(("route-1", (("module-x", 2),)),),
-        current_revisions=(("module-x", 3),),
-        claim_statuses=(("covers:route-1", "supported"),),
-    ))
-    assert [(goal.goal_id, goal.detector) for goal in goals] == [
-        ("source-changed-under-claim:covers:route-1",
-         "source-changed-under-claim")]
-
-
 def test_stale_claims_and_obligations_emit_with_evidence():
-    goals = scan_observations(_input(
-        stale_claims=(("covers:route-9", ("unit-x",)),),
-        obligations=("unit-needs-map",),
-    ))
+    from learning_os.derive.semantics.claim_status import ClaimStatus
+    status = ClaimStatus("covers:route-9", "stale", "a" * 64, "b" * 64,
+                         ("coarse-pin",), ("unit-x",))
+    goals = scan_observations(_input(claims=(status,), obligations=("unit-needs-map",)))
     assert [(goal.goal_id, goal.detector) for goal in goals] == [
-        ("lineage-stale:covers:route-9", "lineage-stale"),
-        ("study-map-obligation:unit-needs-map", "study-map-obligation"),
-    ]
+        (status.goal_id, "lineage-stale"),
+        ("study-map-obligation:unit-needs-map", "study-map-obligation")]
     assert goals[0].evidence[0] == "claim:covers:route-9"
     assert goals[1].evidence == ("unit:unit-needs-map",)
 
 
-def test_claim_reviews_reach_the_review_detector():
-    goals = scan_observations(_input(
-        claim_reviews=(("covers:route-1", "", "supported"),
-                       ("covers:route-2", "aram", "supported"),
-                       ("covers:route-3", "aram", "contested")),
-    ))
-    assert [(goal.goal_id, goal.detector) for goal in goals] == [
-        ("claims-needing-review:covers:route-1", "claims-needing-review"),
-        ("claims-needing-review:covers:route-3", "claims-needing-review"),
-    ]
+def test_disputed_claim_reviews_reach_the_review_detector():
+    from learning_os.derive.semantics.claim_status import ClaimStatus
+    rows = (ClaimStatus("covers:route-1", "supported"),
+            ClaimStatus("covers:route-3", "contested", "a"*64, "a"*64))
+    goals = scan_observations(_input(claims=rows))
+    assert [goal.goal_id for goal in goals] == [rows[1].goal_id]
 
 
 def test_known_ids_dedup_every_detector():
-    known = ("covering-routes-stale:route-1",
-             "source-changed-under-claim:covers:route-2",
-             "lineage-stale:covers:route-9",
-             "study-map-obligation:unit-needs-map",
-             "claims-needing-review:covers:route-1")
-    goals = scan_observations(_input(
-        route_covers=(("route-1", ("knowledge-a",)),),
-        node_digest_pins=(("route-1", (("knowledge-a", "sha256:old"),)),),
-        live_node_digests=(("knowledge-a", "sha256:new"),),
-        route_digest_pins=(("route-2", "sha256:old"),),
-        live_route_digests=(("route-2", "sha256:new"),),
-        claim_statuses=(("covers:route-1", "supported"),
-                        ("covers:route-2", "supported")),
-        stale_claims=(("covers:route-9", ("unit-x",)),),
-        obligations=("unit-needs-map",),
-        claim_reviews=(("covers:route-1", "", "supported"),),
-        known_ids=known,
-    ))
-    assert goals == ()
+    from learning_os.derive.semantics.claim_status import ClaimStatus
+    rows = (ClaimStatus("covers:route-9", "stale", "a"*64, "b"*64),
+            ClaimStatus("covers:route-3", "contested", "a"*64, "a"*64))
+    assert scan_observations(_input(claims=rows, obligations=("unit-needs-map",),
+        known_ids=tuple(row.goal_id for row in rows) + ("study-map-obligation:unit-needs-map",))) == ()
 
 
 def test_goals_sort_deterministically():
@@ -261,52 +168,30 @@ def test_scan_compares_stored_digests_not_file_membership(mini_repo, monkeypatch
 
     def row_goals():
         goals = scan_observations(collect_observations(mini_repo, days=30))
-        return (
-            sorted(goal.goal_id for goal in goals
-                   if goal.detector == "source-changed-under-claim"),
-            sorted(goal.goal_id for goal in goals
-                   if goal.detector == "covering-routes-stale"),
-        )
+        return sorted(goal.goal_id.split("@", 1)[0] for goal in goals if goal.detector == "lineage-stale")
 
     obs = collect_observations(mini_repo, days=30)
-    assert set(dict(obs.route_digest_pins)) == {route_a, route_b}
-    assert dict(obs.route_revision_pins) == {
-        "route-legacy": (("module-demo", 3),)}
-    assert dict(obs.claim_units) == {
-        f"covers:{route_a}": "unit-demo-l01",
-        f"covers:{route_b}": "unit-demo-l02"}
-    assert row_goals() == ([], [])
-
+    states = {row.claim_id: row for row in obs.claims}
+    assert states[f"covers:{route_a}"].unit_id == "unit-demo-l01"
+    assert states[f"covers:{route_b}"].unit_id == "unit-demo-l02"
+    assert row_goals() == []
     monkeypatch.setenv("GIT_DIR", "/dev/null")
-    assert row_goals() == ([], [])
+    assert row_goals() == []
     monkeypatch.delenv("GIT_DIR", raising=False)
-
     _rewrite_route(mini_repo, route_b, angle="Beta angle, revised.")
-    assert row_goals() == (
-        [f"source-changed-under-claim:covers:{route_b}"], [])
+    assert row_goals() == [f"lineage-stale:covers:{route_b}"]
     _rewrite_route(mini_repo, route_b, angle="Beta angle.")
-
-    _rewrite_node(mini_repo, "unit-demo-l01", "knowledge-demo-alpha",
-                  title="Alpha, reframed")
-    assert row_goals() == ([], [f"covering-routes-stale:{route_a}"])
-    _rewrite_node(mini_repo, "unit-demo-l01", "knowledge-demo-alpha",
-                  title="Alpha")
-
+    _rewrite_node(mini_repo, "unit-demo-l01", "knowledge-demo-alpha", title="Alpha, reframed")
+    assert row_goals() == [f"lineage-stale:covers:{route_a}"]
+    _rewrite_node(mini_repo, "unit-demo-l01", "knowledge-demo-alpha", title="Alpha")
     _rewrite_revision(mini_repo, "module-demo", 4)
-    assert row_goals() == (
-        ["source-changed-under-claim:covers:route-legacy"], [])
-
-    proc = subprocess.run(
-        [sys.executable, str(LOS), "--root", str(mini_repo),
-         "intelligence-scan", "--json"],
-        capture_output=True, text=True, timeout=180)
+    assert row_goals() == ["lineage-stale:covers:route-legacy"]
+    proc = subprocess.run([sys.executable, str(LOS), "--root", str(mini_repo),
+                           "intelligence-scan", "--json"], capture_output=True, text=True, timeout=180)
     assert proc.returncode == 0, proc.stderr
-    payload_ids = {goal["goal_id"] for goal in json.loads(proc.stdout)["goals"]}
-    assert "source-changed-under-claim:covers:route-legacy" in payload_ids
-    assert not any(
-        goal_id.startswith("covering-routes-stale:")
-        for goal_id in payload_ids
-    )
+    goals = json.loads(proc.stdout)["goals"]
+    assert {goal["detector"] for goal in goals} == {"lineage-stale", "study-map-obligation"}
+    assert all(len(goal["goal_id"].split("@")[-1]) == 64 for goal in goals if goal["detector"] == "lineage-stale")
 
 
 def test_scan_proposes_dependent_revalidation_after_evidence_moves(
@@ -320,7 +205,7 @@ def test_scan_proposes_dependent_revalidation_after_evidence_moves(
     """
     import hashlib
 
-    from learning_os.derive.semantics import scan as scan_module
+    from learning_os.derive.semantics import claim_status as scan_module
     from learning_os.derive.semantics.lineage import dump_ledger, record_claim
     from learning_os.derive.semantics.scan import collect_observations
 
@@ -370,7 +255,7 @@ def test_scan_proposes_dependent_revalidation_after_evidence_moves(
         "scope:proof:a": ("file:work/evidence.md",),
         "scope:proof:b": ("scope:proof:a",),
     }
-    assert {goal.goal_id for goal in scan_observations(obs)} == {
+    assert {goal.goal_id.split("@", 1)[0] for goal in scan_observations(obs)} == {
         "lineage-stale:scope:proof:a", "lineage-stale:scope:proof:b"}
 
     proc = subprocess.run(
@@ -378,7 +263,7 @@ def test_scan_proposes_dependent_revalidation_after_evidence_moves(
          "intelligence-scan", "--json"],
         capture_output=True, text=True, timeout=180)
     assert proc.returncode == 0, proc.stderr
-    assert {goal["goal_id"] for goal in json.loads(proc.stdout)["goals"]} == {
+    assert {goal["goal_id"].split("@", 1)[0] for goal in json.loads(proc.stdout)["goals"]} == {
         "lineage-stale:scope:proof:a", "lineage-stale:scope:proof:b"}
 
 
@@ -388,7 +273,7 @@ def test_missing_evidence_resolves_once_for_all_claims_sharing_it(
     """Examination finding 3: three claims pinning one missing key attempt
     the resolver once per collection — and all three still go stale, so
     the collection stays fail-closed."""
-    from learning_os.derive.semantics import scan as scan_module
+    from learning_os.derive.semantics import claim_status as scan_module
     from learning_os.derive.semantics.lineage import dump_ledger, record_claim
     from learning_os.derive.semantics.scan import collect_observations
 
@@ -426,7 +311,9 @@ def test_brief_json_on_a_quiet_repo_is_empty_but_totalled(mini_repo):
          "intelligence-scan", "--brief", "--json"],
         capture_output=True, text=True, timeout=180)
     assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout) == {
+    payload = json.loads(proc.stdout)
+    assert all(row["decisions"] == 0 and not row["quiet"] for row in payload.pop("detectors").values())
+    assert payload == {
         "contract": "intelligence-scan-brief", "groups": [],
         "omitted_goals": 0, "omitted_groups": 0,
         "total_goals": 0, "total_groups": 0,
@@ -627,8 +514,7 @@ def test_withdrawn_claims_stay_out_of_row_detectors(mini_repo):
                   title="Alpha, reframed")
     goals = scan_observations(collect_observations(mini_repo, days=0))
     assert [goal.goal_id for goal in goals
-            if goal.detector in ("source-changed-under-claim",
-                                 "covering-routes-stale")] == []
+            if goal.detector == "lineage-stale"] == []
 
 
 def test_route_patch_in_sibling_unit_stales_only_that_routes_claim(mini_repo):

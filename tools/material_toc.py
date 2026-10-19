@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -40,6 +39,8 @@ TOOLS = Path(__file__).resolve().parent
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
+from learning_os.domain.verbatim import matches  # noqa: E402
+from learning_os.store.materials.pdf_text import pdf_page_text, pdf_reader  # noqa: E402
 from learning_os.store.materials.resolution import (  # noqa: E402
     PathBoundaryError,
     material_uri_authority,
@@ -140,11 +141,7 @@ def outline_toc(path: Path, depth: int) -> list[tuple[int, str, int | None]]:
 
 
 def page_text(path: Path, page: int) -> str:
-    out = subprocess.run(
-        ["pdftotext", "-f", str(page), "-l", str(page), str(path), "-"],
-        capture_output=True, text=True,
-    )
-    return out.stdout
+    return pdf_page_text(pdf_reader(path.read_bytes()), page)
 
 
 def printed_toc(path: Path, scan_pages: int) -> list[str]:
@@ -162,10 +159,6 @@ def printed_toc(path: Path, scan_pages: int) -> list[str]:
             if re.match(r"^\s*\d+(\.\d+)*\.?\s+[A-ZÀ-Ü]", line):
                 rows.append(f"[pdf p{page}] {line.strip()}")
     return rows
-
-
-def normalise(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip().casefold()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -196,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.verify:
         if not args.page or not args.expect:
             raise SystemExit("--verify needs --page and --expect")
-        found = normalise(args.expect) in normalise(page_text(path, args.page))
+        found = matches(args.expect, page_text(path, args.page))
         print(f"{'OK  ' if found else 'MISS'} p{args.page} {args.expect!r} in {path.name}")
         return 0 if found else 1
 

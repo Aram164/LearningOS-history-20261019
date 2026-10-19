@@ -28,6 +28,7 @@ import arch_surface
 import pytest
 import yaml
 from arch_schema_deltas import (
+    _before_approved_c1_schema,
     _restore_phase6_descriptions,
     _strip_approved_owner_metadata,
     _strip_bf_description_updates,
@@ -974,7 +975,7 @@ def test_request_schema_aliases_are_byte_identical_to_base(base_ref):
         rel = f"system/schema/requests/{old_name}.schema.json"
         new_rel = f"system/schema/requests/{new_name}.schema.json"
         old_text = _git_show(base_ref, rel)
-        new = json.loads((ROOT / new_rel).read_text())
+        new = _before_approved_c1_schema(new_name, (ROOT / new_rel).read_bytes())
         if old_text is None:
             assert not (ROOT / rel).exists(), rel
             old = json.loads(_git_show(base_ref, new_rel))

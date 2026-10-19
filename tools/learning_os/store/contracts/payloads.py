@@ -15,6 +15,7 @@ different answers to the same question.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 from pathlib import Path
@@ -329,19 +330,16 @@ def all_payload_schemas(
 
 
 
-def _check_payload_choices(field: str, action: argparse.Action,
-                           value: object) -> None:
-    """Refuse a payload value the named command's `choices` would refuse.
+def _check_choices(field: str, choices: object, value: object) -> None:
+    """Refuse a payload value outside one declared `choices` vocabulary.
 
-    Mirrors argparse's own check, including its leniency: an explicit null
-    is absence, not a value, and each element of a repeated flag is checked
-    on its own. A dict `choices` is a subparsers action, never a payload
-    field.
+    An explicit null is absence, not a value, and each element of a
+    repeated field is checked on its own. A dict `choices` is a
+    subparsers action, never a payload field.
     """
-    choices = getattr(action, "choices", None)
     if not choices or isinstance(choices, dict) or value is None:
         return
-    allowed = list(choices)
+    allowed = list(choices)  # type: ignore[arg-type]
     candidates = list(value) if isinstance(value, list) else [value]
     for candidate in candidates:
         if candidate is None:
@@ -351,6 +349,11 @@ def _check_payload_choices(field: str, action: argparse.Action,
                 f"invalid payload: {field} must be one of {allowed}, "
                 f"got {candidate!r}"
             )
+
+
+def _check_payload_choices(field: str, action: argparse.Action,
+                           value: object) -> None:
+    _check_choices(field, getattr(action, "choices", None), value)
 
 
 def payload_to_namespace(
@@ -381,6 +384,47 @@ def payload_to_namespace(
         action = by_dest.get(key)
         if action is not None:
             _check_payload_choices(key, action, value)
+        setattr(namespace, key, value)
+    namespace.root = root
+    namespace.expected_snapshot = expected_snapshot
+    namespace.expected_revision = [
+        f"{artifact}={revision}" for artifact, revision in (expected_revisions or {}).items()
+    ]
+    return namespace
+
+
+def payload_to_namespace_from_schema(
+    schema_root: Path,
+    operation: str,
+    payload: dict,
+    *,
+    root: str | None,
+    expected_snapshot: str | None,
+    expected_revisions: dict[str, int] | None,
+) -> argparse.Namespace:
+    """Build a handler namespace from the request schema, with no parser.
+
+    Gateway admission must not construct a CLI parser to learn what a
+    payload means: the effective request schema already declares every
+    field's default and choices (``x-los-cli``), because it is generated
+    from that same parser in the adapters layer. Semantics match
+    ``payload_to_namespace`` exactly — an omitted field keeps its schema
+    default, an explicit null/false/empty value is carried as sent, and
+    declared choices are enforced — while CLI parsing itself stays with
+    the adapters that own it.
+    """
+    doc = request_schema(schema_root, operation)
+    properties = doc.get("properties", {})
+    namespace = argparse.Namespace()
+    for dest, subschema in properties.items():
+        cli = subschema.get("x-los-cli", {}) if isinstance(subschema, dict) else {}
+        default = cli["default"] if "default" in cli else (
+            subschema.get("default") if isinstance(subschema, dict) else None)
+        setattr(namespace, dest, copy.deepcopy(default))
+    for key, value in payload.items():
+        subschema = properties.get(key, {})
+        cli = subschema.get("x-los-cli", {}) if isinstance(subschema, dict) else {}
+        _check_choices(key, cli.get("choices"), value)
         setattr(namespace, key, value)
     namespace.root = root
     namespace.expected_snapshot = expected_snapshot

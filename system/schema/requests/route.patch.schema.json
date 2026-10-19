@@ -159,6 +159,27 @@
         "transport_only": true,
         "envelope_owned": false
       }
+    },
+    "claim_evidence": {
+      "type": "object",
+      "description": "One reviewed covers claim for this exact route: claim_id, evidence and optional read revisions. Required for covered material-identity changes; local readable material needs a quote at an explicit page/window.",
+      "x-los-cli": {
+        "flags": [
+          "--claim-evidence"
+        ],
+        "position": null,
+        "action": "store",
+        "nargs": null,
+        "const": null,
+        "default": null,
+        "type": "json_object",
+        "choices": null,
+        "metavar": null,
+        "required": false,
+        "stdin": false,
+        "transport_only": false,
+        "envelope_owned": false
+      }
     }
   },
   "x-los-cli-command": {

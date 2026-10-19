@@ -13,7 +13,7 @@ from gateway_helpers import (
     file_sha256,
     run_v2_capability,
 )
-from repo_builders import material_fixture, run_los, write_yaml
+from repo_builders import material_fixture, run_los, write_minimal_pdf, write_yaml
 
 from learning_os.app.handlers.maps import unit_map_import
 from learning_os.app.handlers.routes import compaction_plan, route_patch_plan
@@ -125,10 +125,19 @@ def test_route_patch_updates_inheritance_and_exact_selections_but_preserves_over
     assert artifacts == {"module-demo", unit_id, smid}
     # Fully inherited descriptions need no study-map write at all.
     assert repo.study_maps[smid].path not in writes
-    (repo.materials_root / "source-demo-book/lecture-02.pdf").write_text("new synthetic lecture")
+    text = "The expected value is the probability weighted sum of the possible outcomes."
+    material = repo.materials_root / "source-demo-book/lecture-02.pdf"
+    write_minimal_pdf(material, [text])
+    write_minimal_pdf(material.with_name("book.pdf"), [text])
+    write_yaml(mini_repo / "records/materials-manifest.yaml", {"files": {
+        "source-demo-book/" + path.name: {"sha256": file_sha256(path), "size": path.stat().st_size}
+        for path in material.parent.iterdir() if path.is_file()}})
+    evidence = {"claim_id": "covers:" + rid, "evidence": [{
+        "kind": "quote", "ref": "material://source-demo-book/lecture-02.pdf", "page": 1, "text": text}]}
     response = approved_v2_call(
-        mini_repo, capability="route.patch", payload={"unit_id": unit_id, "route_id": rid, "changes": changes},
-        artifact_ids=sorted(artifacts), idempotency_key="patch-demo",
+        mini_repo, capability="route.patch", payload={"unit_id": unit_id, "route_id": rid,
+                                                    "changes": changes, "claim_evidence": evidence},
+        artifact_ids=sorted(artifacts | {"file:operations/transactions/lineage.yaml"}), idempotency_key="patch-demo",
     )
     assert response.returncode == 0, response.stdout + response.stderr
     changed = load_repo(mini_repo)

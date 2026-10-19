@@ -6,6 +6,7 @@ import datetime as _dt
 import hashlib
 import json
 import re
+from pathlib import Path
 
 import yaml
 from jsonschema import Draft202012Validator, FormatChecker
@@ -14,11 +15,23 @@ from learning_os.app.admission import gesture_allowed
 from learning_os.app.context import OpContext
 from learning_os.app.proposal import ResponsePayload, Result, TransactionProposal
 from learning_os.app.registry import register
+from learning_os.derive.semantics.claim_audits import (
+    AuditError,
+    AuditRecord,
+    ClaimBasis,
+    audit_records,
+    authorization_from_mapping,
+    eligible_pool,
+    result_from_mapping,
+)
+from learning_os.derive.semantics.claim_status import judgment_basis, observe_claims
+from learning_os.derive.semantics.lineage import from_dict, load_ledger
 from learning_os.derive.semantics.scan import intelligence_scan
 from learning_os.domain.failures import NotFound, ValidationFailed, WriteRefused
 from learning_os.domain.suggest import not_found
 from learning_os.store import observations
 from learning_os.store.contracts.gateway import GatewayRequestContext, intent_sha256
+from learning_os.store.loading.yamlio import UniqueKeySafeLoader
 from learning_os.store.revisions import artifact_revision
 from learning_os.store.session_ledger import current_session_id as _current_session_id
 from learning_os.store.session_ledger import load_session_paths as _load_session_paths
@@ -64,6 +77,7 @@ def _render_goal_check(record: dict, payload: dict) -> dict:
         "goal_ids": payload["goal_ids"],
         "state": payload["state"],
         "changes": payload["changes"],
+        **({"audits": payload["audits"]} if "audits" in payload else {}),
     }
 
 
@@ -89,7 +103,8 @@ def goal(ctx: OpContext, req: dict) -> Result:
             prefixed=True,
             exit_code=2,
         )
-    state = "rejected" if req.get("reject") else "deferred" if req.get("defer") else "closed"
+    state = ("authorized" if req.get("authorize") else "rejected" if req.get("reject")
+             else "deferred" if req.get("defer") else "closed")
     revisit_on = req.get("revisit_on")
     if revisit_on is not None:
         if state != "deferred":
@@ -134,7 +149,7 @@ def goal(ctx: OpContext, req: dict) -> Result:
         data: dict = {"schema_version": 1, "type": "goal-ledger", "decisions": {}}
     else:
         try:
-            loaded = yaml.safe_load(raw)
+            loaded = yaml.load(raw, Loader=UniqueKeySafeLoader)
         except yaml.YAMLError as exc:
             raise WriteRefused(
                 f"the goal ledger is malformed, refusing to clobber it: {exc}",
@@ -158,6 +173,78 @@ def goal(ctx: OpContext, req: dict) -> Result:
             prefixed=True,
             exit_code=2,
         )
+    problems = _validate_ledger(root, data)
+    if problems:
+        raise WriteRefused(problems[0], site="goal.decide.invalid-ledger", prefixed=True, exit_code=2)
+    audit_changes = None
+    audit_intent = None
+    try:
+        audits = audit_records(data.get("audits"))
+        audit_ids = [gid for gid in goal_ids if gid.startswith("claims-audit:")]
+        if req.get("audit_file") and (len(goal_ids) != 1 or len(audit_ids) != 1 or state not in {"authorized", "closed"}):
+            raise AuditError("--audit-file requires one exact audit with --authorize or --close")
+        if audit_ids and state in {"authorized", "closed"}:
+            if not req.get("audit_file") or len(goal_ids) != 1:
+                raise AuditError("audit authorization and closure require one reviewed --audit-file")
+            try:
+                value = yaml.load(Path(req["audit_file"]).read_text(encoding="utf-8"), Loader=UniqueKeySafeLoader)
+            except (OSError, UnicodeError, yaml.YAMLError) as exc:
+                raise AuditError(f"cannot read audit file: {exc}") from exc
+            gid = audit_ids[0]
+            audit_intent = intent_sha256({"schema_version": 2, "capability": GOAL_CAPABILITY,
+                "channel": "operator", "session_id": req.get("session_id"), "payload": {
+                    "goal_ids": goal_ids, "state": state, "note": req.get("note"), "audit": value}})
+            prior = audits.get(gid)
+            if state == "authorized":
+                authorization = authorization_from_mapping(value)
+                if authorization.goal_id != gid:
+                    raise AuditError("audit id differs from the supplied full pool")
+                if prior is not None:
+                    if prior.authorization != authorization:
+                        raise AuditError("audit was already frozen; redraw is refused")
+                    updated = prior
+                else:
+                    statuses = observe_claims(root, audits=audits)
+                    pool = eligible_pool(statuses.values())
+                    if authorization.pool != pool:
+                        raise AuditError("audit authorization must freeze the complete current eligible pool")
+                    updated = AuditRecord(authorization)
+            else:
+                if prior is None:
+                    raise AuditError("audit closure requires its preserved authorization")
+                result = result_from_mapping(value, prior.authorization)
+                if prior.result is not None and prior.result != result:
+                    raise AuditError("audit already has a different immutable result")
+                records = load_ledger(root)
+                historical = set()
+                for row in records.values():
+                    while True:
+                        historical.add(ClaimBasis(row.claim_id, judgment_basis(row)))
+                        if row.supersedes is None:
+                            break
+                        row = from_dict(dict(row.supersedes))
+                if not set(prior.authorization.pool).issubset(historical):
+                    raise AuditError("audit pool contains a basis absent from current lineage and its history")
+                report = Path(result.report_path)
+                if not report.is_absolute():
+                    report = root / report
+                try:
+                    checksum = hashlib.sha256(report.read_bytes()).hexdigest()
+                except OSError as exc:
+                    raise AuditError(f"audit report is unreadable: {exc}") from exc
+                if checksum != result.report_sha256.removeprefix("sha256:"):
+                    raise AuditError("audit report digest differs from its reviewed bytes")
+                updated = AuditRecord(prior.authorization, result, prior.authorization_reviewed_sha256, prior.result_reviewed_sha256, prior.authorization_intent_sha256, prior.result_intent_sha256)
+            original_review = (prior.authorization_reviewed_sha256 if state == "authorized" else prior.result_reviewed_sha256) if prior else ""
+            original_intent = (prior.authorization_intent_sha256 if state == "authorized" else prior.result_intent_sha256) if prior else ""
+            if not req.get("check") and original_review and req.get("reviewed_sha256") == original_review and audit_intent == original_intent:
+                return Result({"ok": True, "goal_id": gid, "state": decisions.get(gid, {}).get("state"), "replayed": True})
+            audits[gid] = updated
+            data["audits"] = {key: row.payload() for key, row in sorted(audits.items())}
+            audit_changes = {"goal_id": gid, "before": prior.payload() if prior else None,
+                             "after": updated.payload()}
+    except (AuditError, ValueError) as exc:
+        raise WriteRefused(str(exc), site="goal.decide.invalid-audit", prefixed=True, exit_code=2) from exc
     # Only decidable ids: a goal in the current scan, or already in the
     # ledger (a goal that stopped being detected can still be closed or
     # re-decided). Unknown ids refuse before anything is written, so a
@@ -169,7 +256,7 @@ def goal(ctx: OpContext, req: dict) -> Result:
     except Exception as exc:  # noqa: BLE001 - fail closed to ledger-only
         scan_ids = set()
         scan_failed = exc
-    known = {key for key in decisions if isinstance(key, str)} | scan_ids
+    known = {key for key in decisions if isinstance(key, str)} | scan_ids | set(audits)
     unknown = [goal_id for goal_id in goal_ids if goal_id not in known]
     if unknown:
         lines = []
@@ -195,6 +282,8 @@ def goal(ctx: OpContext, req: dict) -> Result:
         except NotFound as exc:
             exc.extra_stderr = extra
             raise
+    if state == "rejected" and (not isinstance(req.get("note"), str) or not req["note"].strip()):
+        raise WriteRefused("--reject requires a nonempty --note", site="goal.decide.reject-needs-note", prefixed=True, exit_code=2)
     entry: dict = {"state": state, "decided_at": observations.today().isoformat()}
     if revisit_on is not None:
         entry["revisit_on"] = revisit_on
@@ -205,9 +294,16 @@ def goal(ctx: OpContext, req: dict) -> Result:
         "goal_ids": goal_ids,
         "decision": entry,
     }
+    if audit_changes is not None:
+        reviewed["audit"] = audit_changes
     review_sha = "sha256:" + hashlib.sha256(json.dumps(
         reviewed, sort_keys=True, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
+    if audit_changes is not None:
+        proof_key = "authorization_reviewed_sha256" if state == "authorized" else "result_reviewed_sha256"
+        data["audits"][audit_changes["goal_id"]].setdefault(proof_key, review_sha)
+        intent_key = "authorization_intent_sha256" if state == "authorized" else "result_intent_sha256"
+        data["audits"][audit_changes["goal_id"]].setdefault(intent_key, audit_intent)
     data["decisions"] = {**decisions, **{goal_id: dict(entry) for goal_id in goal_ids}}
     problems = _validate_ledger(root, data)
     if problems:
@@ -224,6 +320,8 @@ def goal(ctx: OpContext, req: dict) -> Result:
         "changes": [{"goal_id": goal_id, "before": decisions.get(goal_id),
                      "after": entry} for goal_id in goal_ids],
     }
+    if audit_changes is not None:
+        payload["audits"] = audit_changes
     new_text = yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
     explicit_session = req.get("session_id")
 
@@ -283,7 +381,7 @@ def goal(ctx: OpContext, req: dict) -> Result:
             gesture=context,
         )
     expected = req.get("reviewed_sha256")
-    if (len(goal_ids) > 1 and expected is None) or (expected is not None and expected != review_sha):
+    if ((len(goal_ids) > 1 or audit_changes is not None) and expected is None) or (expected is not None and expected != review_sha):
         raise WriteRefused(
             "batch apply needs the exact --check reviewed-sha256; changed ledger or decisions require a fresh review",
             site="goal.decide.batch-needs-review",

@@ -18,6 +18,7 @@ import yaml
 from repo_builders import run_los, seed_goal_ledger, seed_live_goal_ids
 
 from learning_os.derive.semantics import ScanInput, scan_observations
+from learning_os.derive.semantics.claim_status import ClaimStatus
 from learning_os.derive.semantics.goals import (
     CandidateGoal,
     GoalCluster,
@@ -186,7 +187,7 @@ def test_goal_scan_failure_degrades_to_ledger_only(mini_repo: Path, monkeypatch)
     assert exc.suggestions == suggestions("bogus-id", ["g-ledger"])
     # A ledger-known id still decides under a failed scan.
     result = goals_mod.goal(
-        ctx, {"goal_id": ["g-ledger"], "reject": True, "check": True})
+        ctx, {"goal_id": ["g-ledger"], "reject": True, "check": True, "note": "Explicit scoped rejection"})
     assert result.payload["goal_ids"] == ["g-ledger"]
 
 
@@ -238,15 +239,15 @@ def test_revisit_date_refuses_non_deferral_and_invalid_dates(mini_repo: Path):
 def test_decided_goals_leave_the_scan(mini_repo: Path):
     seed_goal_ledger(mini_repo, {
         "study-map-obligation:unit-x": "rejected",
-        "lineage-stale:claim-y": "rejected",
+        "lineage-stale:claim-y@" + "b"*64: "rejected",
     })
-    assert run_los(mini_repo, "goal", "study-map-obligation:unit-x", "--reject").returncode == 0
-    assert run_los(mini_repo, "goal", "lineage-stale:claim-y", "--defer").returncode == 0
+    assert run_los(mini_repo, "goal", "study-map-obligation:unit-x", "--reject", "--note", "Reviewed decision").returncode == 0
+    assert run_los(mini_repo, "goal", "lineage-stale:claim-y@" + "b"*64, "--defer").returncode == 0
     decided = _read_goal_ledger(mini_repo)
-    assert decided == ("lineage-stale:claim-y", "study-map-obligation:unit-x")
+    assert decided == ("lineage-stale:claim-y@" + "b"*64, "study-map-obligation:unit-x")
     assert collect_observations(mini_repo, days=0).known_ids == decided
     goals = scan_observations(ScanInput(
-        stale_claims=(("claim-y", ("unit-x",)),),
+        claims=(ClaimStatus("claim-y", "stale", "a"*64, "b"*64, moved=("unit-x",)),),
         obligations=("unit-x",),
         known_ids=decided,
     ))
@@ -258,7 +259,8 @@ def test_malformed_ledger_reads_as_no_decisions(mini_repo: Path):
     ledger.parent.mkdir(parents=True, exist_ok=True)
     ledger.write_text("decisions: [not, a, mapping]\n", encoding="utf-8")
     assert _read_goal_ledger(mini_repo) == ()
-    assert collect_observations(mini_repo, days=0).known_ids == ()
+    with pytest.raises(ValueError, match="preserved audit state"):
+        collect_observations(mini_repo, days=0)
 
 
 def test_goal_refuses_a_blank_id(mini_repo: Path):
@@ -316,13 +318,13 @@ def test_one_unit_is_one_decision_despite_extra_nodes():
 def test_lineage_causes_cluster():
     goals = [
         _goal("lineage-stale:a", "lineage-stale",
-              ["claim:a", "moved:file:x", "moved:rev:y"]),
+              ["claim:a", "cause:evidence:file:x", "cause:evidence:rev:y"]),
         _goal("lineage-stale:b", "lineage-stale",
-              ["claim:b", "moved:rev:y", "moved:file:x"]),
+              ["claim:b", "cause:evidence:rev:y", "cause:evidence:file:x"]),
     ]
     (cluster,) = cluster_goals(goals)
     assert cluster.member_ids == ("lineage-stale:a", "lineage-stale:b")
-    assert cluster.cause == ("moved:file:x", "moved:rev:y")
+    assert cluster.cause == ("cause:evidence:file:x", "cause:evidence:rev:y")
 
 
 def test_changed_source_goals_stand_alone():

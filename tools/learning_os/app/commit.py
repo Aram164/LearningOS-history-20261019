@@ -18,10 +18,15 @@ from learning_os.app.outcomes import record_gateway_refusal as _record_gateway_r
 from learning_os.app.outcomes import refusal_from_failure as _refusal_from_failure
 from learning_os.app.projection import publish as _publish
 from learning_os.app.projection import publish_repo as _publish_repo
-from learning_os.app.proposal import CommitIssues, TransactionProposal
+from learning_os.app.proposal import (
+    CommitIssues,
+    CommitOutcome,
+    TransactionProposal,
+)
 from learning_os.derive.validation import validate
 from learning_os.domain.codes import REVISION_CONFLICT
 from learning_os.domain.failures import (
+    Refusal,
     TransactionConflict,
     TransactionSnapshotConflict,
     WriteRefused,
@@ -35,6 +40,7 @@ from learning_os.store.transactions import (
     PostCommitFailure,
     ProjectionFailure,
     TransactionFailure,
+    TransactionPublicationUncertain,
     TransactionService,
 )
 
@@ -57,7 +63,7 @@ def _confirmation_from(result) -> dict:
     }
 
 
-def commit_proposal(ctx: OpContext, proposal: TransactionProposal) -> tuple[int, list[str], dict]:
+def commit_proposal(ctx: OpContext, proposal: TransactionProposal) -> CommitOutcome:
     """Commit one named, receipt-producing canonical transaction.
 
     Returns ``(code, errors, confirmation)``. The confirmation travels back to
@@ -79,12 +85,12 @@ def commit_proposal(ctx: OpContext, proposal: TransactionProposal) -> tuple[int,
         # Name the way through, not only the refusal: the bare named command
         # is what agents find first, and without a pointer the envelope format
         # has to be reverse-engineered from the gateway source.
-        return 2, [
+        return CommitOutcome(2, [
             "canonical writes must use GatewayEnvelopeV2; direct CLI application "
             f"is disabled — apply it with `los capability {proposal.capability} "
             f"--payload-file ENVELOPE.json` (payload schema: `los capabilities "
             f"{proposal.capability} --json`; envelope: WORKFLOWS §25c)"
-        ], {}
+        ], {})
     # PLAN D7: after a failed push only the stored-SHA retry or close may
     # follow, so a new canonical write owned by that session refuses here,
     # before any canonical mutation or receipt. Identity resolves exactly
@@ -101,10 +107,14 @@ def commit_proposal(ctx: OpContext, proposal: TransactionProposal) -> tuple[int,
     try:
         own = _load_session_ledger(root)
     except WriteRefused as exc:
-        return 2, [str(exc)], {}
+        return CommitOutcome(2, [str(exc)], {})
     if own is not None and own["state"] == "committed_unpushed":
-        return 2, [f"already committed as {own['commit_sha']}; "
-                   "use --push or --close"], {}
+        return CommitOutcome(2, [f"already committed as {own['commit_sha']}; "
+                   "use --push or --close"], {})
+    # The proposal's family (proposal.family) is selected by its owning
+    # capability; the engine refuses a gateway request whose capability
+    # does not match the transaction it carries, so a family cannot be
+    # substituted at commit time.
     if proposal.clock is None:
         service = TransactionService(root)
     else:
@@ -112,7 +122,8 @@ def commit_proposal(ctx: OpContext, proposal: TransactionProposal) -> tuple[int,
     delete_paths = tuple(Path(path) for path in (proposal.deletes or ()))
     for path in (*proposal.writes, *delete_paths):
         if path.exists() and not path.is_file():
-            return 2, [f"cannot change {path}: target is not a regular file"], {}
+            return CommitOutcome(
+                2, [f"cannot change {path}: target is not a regular file"], {})
     validated_repo = None
 
     def validation_errors():
@@ -191,18 +202,18 @@ def commit_proposal(ctx: OpContext, proposal: TransactionProposal) -> tuple[int,
                 raise translated from exc
     except TransactionConflict as exc:
         _record_gateway_refusal(REVISION_CONFLICT, True)
-        return 3, CommitIssues(
+        return CommitOutcome(3, CommitIssues(
             ["artifact revision conflict — reload the affected record before writing"],
             details={"conflicts": {
                 artifact: {"expected": expected, "actual": actual}
                 for artifact, (expected, actual) in exc.conflicts.items()
-            }}), {}
+            }}), {}, refusal=Refusal(REVISION_CONFLICT, True))
     except TransactionSnapshotConflict:
         # The V2 gateway owns the typed stale-snapshot response. Let the exact
         # expected/actual values cross that boundary without being flattened
         # into a generic transaction failure.
         raise
-    except (ProjectionFailure, PostCommitFailure):
+    except (ProjectionFailure, PostCommitFailure, TransactionPublicationUncertain):
         # Typed failure provenance crosses the (code, errors) channel by
         # propagation: the gateway classifies by its attrs, and direct CLI
         # use still exits 2 through los.py's TransactionFailure handler.
@@ -214,6 +225,6 @@ def commit_proposal(ctx: OpContext, proposal: TransactionProposal) -> tuple[int,
         # an untyped one stays prose and classifies as INVALID_REQUEST.
         refusal = _refusal_from_failure(exc)
         if refusal is not None:
-            _record_gateway_refusal(*refusal)
-        return 2, [str(exc)], {}
-    return 0, [], _confirmation_from(result)
+            _record_gateway_refusal(refusal.code, refusal.retryable)
+        return CommitOutcome(2, [str(exc)], {}, refusal=refusal)
+    return CommitOutcome(0, [], _confirmation_from(result))

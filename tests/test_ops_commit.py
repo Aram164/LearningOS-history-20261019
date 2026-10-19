@@ -683,3 +683,81 @@ def test_deletes_normalize_to_paths(mini_repo: Path, monkeypatch):
             _ctx(mini_repo, "capture.create"), proposal)
     assert (code, errors) == (0, [])
     assert captured["deletes"] == (victim,)
+
+
+def test_sequential_refusals_carry_their_own_classification(
+        mini_repo: Path, monkeypatch):
+    """S3: typed outcomes replace the tuple/ambient channel without leakage.
+
+    Three commits in one process — a revision conflict, a validation
+    failure, then a success — must each carry exactly their own refusal
+    (or none), never an earlier one's classification.
+    """
+    import learning_os.store.transactions as transaction_module
+
+    failures = [
+        TransactionConflict({"a:1": (0, 1)}),
+        TransactionValidationFailure("staged write invalid"),
+    ]
+
+    def flaky_commit(self, *args, **kwargs):
+        if failures:
+            raise failures.pop(0)
+        return _stub_result()
+
+    monkeypatch.setattr(
+        transaction_module.TransactionService, "commit", flaky_commit)
+    proposal = TransactionProposal(
+        capability="capture.create", writes={}, artifact_ids=())
+    outcomes = []
+    for suffix in ("seq-1", "seq-2", "seq-3"):
+        with gateway_request_context(_gateway_context("capture.create", suffix)):
+            outcomes.append(ops_commit.commit_proposal(
+                _ctx(mini_repo, "capture.create"), proposal))
+    assert outcomes[0].code == 3
+    assert outcomes[0].refusal is not None
+    assert (outcomes[0].refusal.code, outcomes[0].refusal.retryable) == (
+        REVISION_CONFLICT, True)
+    assert outcomes[1].code == 2
+    assert outcomes[1].refusal is not None
+    assert (outcomes[1].refusal.code, outcomes[1].refusal.retryable) == (
+        VALIDATION_FAILED, False)
+    assert outcomes[2].code == 0
+    assert outcomes[2].refusal is None, "a success must not inherit a refusal"
+    assert outcomes[2].confirmation["transaction_id"]
+
+
+def test_commit_family_is_selected_by_the_owning_capability():
+    from learning_os.app.proposal import CommitFamily, commit_family
+
+    assert commit_family("capture.create") is CommitFamily.ORDINARY
+    assert commit_family("goal.decision.record") is CommitFamily.GOAL
+    assert commit_family("ai-action.delivery.apply") is CommitFamily.AI
+    proposal = TransactionProposal(
+        capability="goal.decision.record", writes={}, artifact_ids=())
+    assert proposal.family is CommitFamily.GOAL
+
+
+def test_family_substitution_refuses_before_any_write(mini_repo: Path):
+    """A gateway request cannot substitute another capability's family.
+
+    The engine admits a transaction only for the capability its sealed
+    request names; a mismatched capability (a substituted family) is
+    refused before any canonical byte or receipt exists.
+    """
+    from learning_os.domain.failures import TransactionFailure
+    from learning_os.store.transactions import TransactionService
+
+    target = mini_repo / "work/inbox/substituted.md"
+    context = _gateway_context("goal.decision.record", "family-sub")
+    with pytest.raises(TransactionFailure, match="does not match"):
+        TransactionService(mini_repo).commit(
+            capability="capture.create",
+            writes={target: "smuggled\n"},
+            artifact_ids=["capture:family-sub"],
+            expected_revisions={"capture:family-sub": 0},
+            gateway_request=context,
+        )
+    assert not target.exists()
+    assert not list(
+        (mini_repo / "operations/transactions").glob("transaction-*.yaml"))

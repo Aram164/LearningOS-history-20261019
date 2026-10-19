@@ -473,6 +473,9 @@ def _sliced_route(route_id: str, locator: str, scope: str = "current") -> dict:
     }
 
 
+SLICED_LECTURE_TEXT = "Expected-value lecture: the probability weighted average of the possible outcomes."
+
+
 def _sliced_unit(root: Path, routes: list[dict]) -> None:
     add_curriculum(root)
     unit_path = root / "curriculum/modules/module-demo/units/unit-demo-l01/unit.yaml"
@@ -495,8 +498,13 @@ def _sliced_unit(root: Path, routes: list[dict]) -> None:
     registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
     registry["sources"][0]["material"] = "material://source-demo-book/"
     write_yaml(registry_path, registry)
-    write_minimal_pdf(root.parent / "materials/source-demo-book/lecture-01.pdf",
-                      ["expected-value lecture"])
+    material = root.parent / "materials/source-demo-book/lecture-01.pdf"
+    write_minimal_pdf(material, [SLICED_LECTURE_TEXT])
+    manifest_path = root / "records/materials-manifest.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text()) if manifest_path.exists() else {"files": {}}
+    manifest.setdefault("files", {})["source-demo-book/lecture-01.pdf"] = {
+        "size": material.stat().st_size, "sha256": hashlib.sha256(material.read_bytes()).hexdigest()}
+    write_yaml(manifest_path, manifest)
 
 
 def _valid_dossier(root: Path, route_id: str, locator: str) -> dict:

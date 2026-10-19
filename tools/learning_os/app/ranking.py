@@ -16,8 +16,11 @@ from learning_os.derive.semantics.goals import (
     cluster_goals,
     rank_clusters,
 )
-from learning_os.derive.semantics.scan import intelligence_scan
-from learning_os.derive.semantics.scan import read_goal_ledger as _read_goal_ledger
+from learning_os.derive.semantics.scan import (
+    GoalLedgerObservation,
+    intelligence_scan,
+    observe_goal_ledger,
+)
 from learning_os.store import observations
 from learning_os.store.loader import load_repo
 
@@ -105,7 +108,7 @@ def _cluster_modules(repo, route_modules: dict[str, str],
             continue
         route = rest if kind == "covering-routes-stale" else None
         if route is None and rest.startswith("covers:"):
-            route = rest[len("covers:"):]
+            route = rest[len("covers:"):].split("@", 1)[0]
         if route and route in route_modules:
             modules.add(route_modules[route])
     return modules
@@ -113,6 +116,7 @@ def _cluster_modules(repo, route_modules: dict[str, str],
 
 def ranked_scan(root, *, days: int = 30,
                 feed: Mapping | None = None,
+                goal_ledger: GoalLedgerObservation | None = None,
                 ) -> tuple[tuple[CandidateGoal, ...], tuple[RankedCluster, ...], int]:
     """Goals clustered by shared cause, ordered by exam proximity.
 
@@ -120,7 +124,8 @@ def ranked_scan(root, *, days: int = 30,
     existing detectors plus the goal ledger; still read-only. ``feed``
     is a caller-supplied session-count mapping; None behaves as before.
     """
-    goals = intelligence_scan(root, days=days, feed=feed)
+    ledger = goal_ledger if goal_ledger is not None else observe_goal_ledger(root)
+    goals = intelligence_scan(root, days=days, feed=feed, goal_ledger=ledger)
     clusters = cluster_goals(goals)
     repo = load_repo(root)
     deadlines = _academic_deadlines(repo)
@@ -138,4 +143,4 @@ def ranked_scan(root, *, days: int = 30,
     ranked = rank_clusters(
         clusters, today=observations.today(), deadlines=deadlines,
         module_status=module_status, cluster_modules=mapping)
-    return goals, ranked, len(_read_goal_ledger(root))
+    return goals, ranked, len(ledger.known_ids)

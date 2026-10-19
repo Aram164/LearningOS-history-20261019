@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import datetime as dt
+import fcntl
 import hashlib
 import inspect
 import json
@@ -40,13 +41,14 @@ from learning_os.domain.failures import (
     TransactionConflict,
     TransactionFailure,
     TransactionIdempotencyConflict,
+    TransactionPublicationUncertain,
     TransactionRecoveryConflict,
     TransactionRollbackIncomplete,
     TransactionScopeError,
     TransactionSnapshotConflict,
     TransactionValidationFailure,
 )
-from learning_os.domain.transaction import TransactionResult
+from learning_os.domain.transaction import PublicationState, TransactionResult
 from learning_os.store import observations
 from learning_os.store import revisions as revision_store
 from learning_os.store.contracts.gateway import (
@@ -86,6 +88,7 @@ __all__ = [
     "ReplayEvidenceError",
     "TransactionFailure",
     "TransactionIdempotencyConflict",
+    "TransactionPublicationUncertain",
     "TransactionRecoveryConflict",
     "TransactionRollbackIncomplete",
     "TransactionValidationFailure",
@@ -175,28 +178,62 @@ def transaction_artifacts(root: Path, artifact_ids: Iterable[str],
     return artifacts
 
 
+def _sync_fd(fd: int) -> None:
+    """One persistence barrier: flush, then the stronger full flush.
+
+    ``os.fsync`` alone does not flush the drive cache on macOS; where the
+    platform offers ``F_FULLFSYNC`` the barrier is not proven until it
+    returns. Its failure is the barrier's failure — never silently
+    downgraded to the weaker guarantee.
+    """
+    os.fsync(fd)
+    fullfsync = getattr(fcntl, "F_FULLFSYNC", None)
+    if fullfsync is not None:
+        fcntl.fcntl(fd, fullfsync)
+
+
+def _sync_directory(path: Path) -> None:
+    """Make one directory's entries durable; a missing directory is done."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except FileNotFoundError:
+        return
+    try:
+        _sync_fd(fd)
+    finally:
+        os.close(fd)
+
+
 def atomic_write_bytes(path: Path, content: bytes) -> None:
     """Atomically replace *path* and make the replacement crash-durable.
 
     ``os.replace`` alone guarantees visibility, not persistence. Flushing the
     file before replacement and the directory after it closes the window where
     a committed receipt can survive while the content it records does not.
+    Newly created ancestors are part of the same guarantee: each created
+    directory's entry lives in its parent, so every created level is
+    synchronized after the replacement, deepest first.
     """
     # Preserve the gateway's established atomic sibling name. Existing red-team
     # checks deliberately block this path to verify rollback.
     tmp = path.with_name(f".{path.name}.tmp")
     try:
+        created: list[Path] = []
+        cursor = path.parent
+        while not cursor.exists():
+            created.append(cursor)
+            if cursor.parent == cursor:
+                break
+            cursor = cursor.parent
         path.parent.mkdir(parents=True, exist_ok=True)
         with tmp.open("wb") as handle:
             handle.write(content)
             handle.flush()
-            os.fsync(handle.fileno())
+            _sync_fd(handle.fileno())
         os.replace(tmp, path)
-        directory_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _sync_directory(path.parent)
+        for ancestor in created:
+            _sync_directory(ancestor.parent)
     except OSError as exc:
         with contextlib.suppress(OSError):
             tmp.unlink(missing_ok=True)
@@ -388,6 +425,107 @@ def _matches_journal_side(kind: str, digest: str | None, side: dict) -> bool:
     return kind == "file" and digest == _strip_journal_digest(side.get("sha256"))
 
 
+def _receipt_binding_detail(root: Path, data: dict, intent: Mapping) -> str:
+    """Join a receipt to its journal and request evidence, or say why not.
+
+    Returns "" when the receipt is bound, else a short structural detail.
+    Schema validity, committed status and a matching transaction id alone
+    are not evidence: the receipt's recorded effects must equal the
+    journal's intended effects for every non-ledger path, and a version-2
+    receipt must join the idempotency row its request created. Historical
+    evidence is verified against the recorded transaction — live files
+    and the whole current ledger are never required to equal an old
+    postimage, so later legitimate writes do not invalidate it.
+    """
+    entries = intent.get("paths")
+    if not isinstance(entries, list):
+        # A version-1 journal carries no intended effects to join against;
+        # its conservative handling lives in its own reconciler.
+        return ""
+    journal: dict[str, dict] = {}
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            return "the journal entry is malformed"
+        if entry["path"] in journal:
+            return "the journal lists a path twice"
+        journal[entry["path"]] = entry
+    exempt: set[str] = set()
+    for ledger_path in (revision_store.revision_ledger_path(root),
+                        _idempotency_ledger_path(root)):
+        with contextlib.suppress(TransactionFailure):
+            exempt.add(_safe_relative(root, ledger_path))
+    writes = data.get("writes")
+    if not isinstance(writes, list):
+        return "the receipt records no writes"
+    rows: dict[str, dict] = {}
+    for row in writes:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+            return "the receipt write row is malformed"
+        if row["path"] in rows:
+            return "the receipt records a write twice"
+        rows[row["path"]] = row
+    for relative, row in rows.items():
+        entry = journal.get(relative)
+        if entry is None:
+            return f"the receipt records a write the journal does not: {relative}"
+        after = entry.get("after")
+        if not isinstance(after, dict):
+            return f"the journal records no intended effect for {relative}"
+        expected_after = (
+            None if after.get("kind") == "absent"
+            else _strip_journal_digest(after.get("sha256"))
+        )
+        if after.get("kind") not in ("absent", "file") \
+                or (after.get("kind") == "file" and expected_after is None) \
+                or row.get("sha256_after") != expected_after:
+            return f"the receipt effect does not match the journal: {relative}"
+        before = entry.get("before")
+        if not isinstance(before, dict):
+            return f"the journal entry is malformed: {relative}"
+        expected_before = (
+            None if before.get("kind") == "absent"
+            else _strip_journal_digest(before.get("sha256"))
+        )
+        if before.get("kind") not in ("absent", "file") \
+                or (before.get("kind") == "file" and expected_before is None) \
+                or row.get("sha256_before") != expected_before \
+                or row.get("created") != (before.get("kind") == "absent"):
+            return f"the receipt origin does not match the journal: {relative}"
+    for relative in journal:
+        if relative not in exempt and relative not in rows:
+            return f"the journal effect is missing from the receipt: {relative}"
+    if data.get("schema_version") == 2:
+        request = data.get("request")
+        if not isinstance(request, dict):
+            return "the receipt has no request record"
+        try:
+            ledger = _load_idempotency_entries(root)
+        except TransactionFailure:
+            return "the idempotency evidence is unreadable"
+        row = ledger.get(request.get("idempotency_key"))
+        if row is None:
+            return "the receipt is not bound to an idempotency entry"
+        if row.get("transaction_id") != data.get("id") \
+                or row.get("receipt_path") != intent.get("receipt_path") \
+                or row.get("request_id") != request.get("request_id") \
+                or row.get("intent_sha256") != request.get("intent_sha256") \
+                or row.get("capability") != data.get("capability") \
+                or row.get("snapshot_before") != data.get("snapshot_before") \
+                or row.get("snapshot_after") != data.get("snapshot_after"):
+            return "the idempotency entry does not match the receipt"
+        artifact_revisions = data.get("artifact_revisions")
+        if not isinstance(artifact_revisions, dict):
+            return "the receipt has no artifact revisions"
+        recorded = {}
+        for artifact, entry in artifact_revisions.items():
+            if not isinstance(entry, dict):
+                return "the receipt artifact revision is malformed"
+            recorded[artifact] = entry.get("after")
+        if recorded != dict(row.get("revisions") or {}):
+            return "the idempotency revisions do not match the receipt"
+    return ""
+
+
 def _inspect_commit_receipt(root: Path, intent: Mapping) -> tuple[str, str]:
     """VALID_COMMIT, ABSENT, or CONTRADICTORY for the journal's receipt.
 
@@ -440,6 +578,9 @@ def _inspect_commit_receipt(root: Path, intent: Mapping) -> tuple[str, str]:
         return ("CONTRADICTORY", "the receipt names a different transaction")
     if data.get("status") != "committed":
         return ("CONTRADICTORY", "the receipt is not committed")
+    detail = _receipt_binding_detail(root, data, intent)
+    if detail:
+        return ("CONTRADICTORY", detail)
     return ("VALID_COMMIT", "")
 
 
@@ -461,6 +602,7 @@ def _conflict_message(transaction_id: str, journal_rel: str, summary: str,
 def _remove_journal(tx_dir: Path, transaction_id: str, journal_rel: str) -> None:
     try:
         shutil.rmtree(tx_dir)
+        _sync_directory(tx_dir.parent)
     except OSError as exc:
         raise TransactionRecoveryConflict(
             f"transaction {transaction_id} was reconciled but its recovery "
@@ -680,6 +822,7 @@ def _unwind_v2_entries(root: Path, tx_dir: Path, entries: list,
             if before["kind"] == "absent":
                 with _engine_phase("restore"):
                     path.unlink()
+                    _sync_directory(path.parent)
             else:
                 blob = (tx_dir / before["backup_id"]).read_bytes()
                 if hashlib.sha256(blob).hexdigest() \
@@ -721,6 +864,33 @@ def _unwind_v2_entries(root: Path, tx_dir: Path, entries: list,
             transaction_id=transaction_id, conflicts=drifted)
 
 
+def _retire_committed_journal(root: Path, tx_dir: Path, intent: dict,
+                              transaction_id: str, journal_rel: str) -> None:
+    """Retire a proven commit's journal — after re-proving durability.
+
+    A bound receipt proves what was published, not that its directory
+    entry is durable: the barrier that failed during the original commit
+    may still be failing. Retry the receipt-parent synchronization
+    before deleting the recovery evidence; if it still fails, the
+    journal (and the ambiguous outcome) is preserved.
+    """
+    raw_receipt = intent.get("receipt_path")
+    if isinstance(raw_receipt, str) and raw_receipt:
+        try:
+            _sync_directory((root / raw_receipt).parent)
+        except OSError as exc:
+            raise TransactionRecoveryConflict(
+                f"transaction {transaction_id} commit receipt durability "
+                f"could not be established ({exc}); no canonical path is "
+                f"affected, the journal was preserved under {journal_rel}, "
+                f"and the next run retries the barrier",
+                transaction_id=transaction_id,
+                conflicts=[{"path": raw_receipt,
+                            "reason": "RECEIPT_DURABILITY_UNPROVEN",
+                            "detail": str(exc)}]) from exc
+    _remove_journal(tx_dir, transaction_id, journal_rel)
+
+
 def _reconcile_v2_journal(root: Path, tx_dir: Path, intent: dict) -> None:
     """Compare-and-undo recovery for one schema-2 journal.
 
@@ -737,7 +907,7 @@ def _reconcile_v2_journal(root: Path, tx_dir: Path, intent: dict) -> None:
     receipt_ref = raw_receipt if isinstance(raw_receipt, str) and raw_receipt \
         else journal_rel
     if verdict == "VALID_COMMIT":
-        _remove_journal(tx_dir, transaction_id, journal_rel)
+        _retire_committed_journal(root, tx_dir, intent, transaction_id, journal_rel)
         return
     if verdict == "CONTRADICTORY":
         conflicts = [{"path": receipt_ref, "reason": "INVALID_COMMIT_RECEIPT",
@@ -783,7 +953,7 @@ def _reconcile_v1_journal(root: Path, tx_dir: Path, intent: dict) -> None:
     receipt_ref = raw_receipt if isinstance(raw_receipt, str) and raw_receipt \
         else journal_rel
     if verdict == "VALID_COMMIT":
-        _remove_journal(tx_dir, transaction_id, journal_rel)
+        _retire_committed_journal(root, tx_dir, intent, transaction_id, journal_rel)
         return
     if verdict == "CONTRADICTORY":
         conflicts = [{"path": receipt_ref, "reason": "INVALID_COMMIT_RECEIPT",
@@ -1057,7 +1227,7 @@ class _CommitRun:
     inflight_dir: Path | None = None
     journal_published: bool = False
     republication_defects: list[Exception] = field(default_factory=list)
-    commit_reached: bool = False
+    publication_state: PublicationState = PublicationState.NOT_PUBLISHED
     failed_stage: str = "core.commit"
     use_combined: bool = False
     pre_stat: str | None = None
@@ -1125,7 +1295,7 @@ class TransactionService:
         # defect instead of an unknown outcome (JF-11).
         run.republication_defects = []
         try:
-            run.commit_reached = False
+            run.publication_state = PublicationState.NOT_PUBLISHED
             run.failed_stage = "core.commit"
             self._publish_journal(run)
             self._apply(run)
@@ -1545,14 +1715,52 @@ class TransactionService:
             run.staging_dir / "intent.json", json.dumps(intent).encode("utf-8"))
         os.rename(run.staging_dir, run.inflight_dir)
         run.journal_published = True
-        dir_fd = os.open(run.inflight_parent, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+        _sync_directory(run.inflight_parent)
+        # A prior failed publication can leave an existing but unproven
+        # directory entry. Re-establish the whole journal namespace on
+        # every attempt, deepest first, before the first canonical effect.
+        ancestor = run.inflight_parent
+        while ancestor != self.root:
+            try:
+                _sync_directory(ancestor.parent)
+            except OSError as exc:
+                raise TransactionFailure(
+                    f"cannot make transaction journal namespace durable: {exc}"
+                ) from exc
+            ancestor = ancestor.parent
+
+    def _guard_apply(self, run: _CommitRun, path: Path,
+                     intended: bytes | None) -> None:
+        """Uncached comparison immediately before one mutation.
+
+        The captured backup is the only pre-state this transaction may
+        replace, and the intended bytes are the only forward state it may
+        find already placed. Anything else is a foreign edit that landed
+        between capture and apply: refuse here, and the compare-and-undo
+        rollback preserves those bytes. This recheck cannot atomically
+        exclude a writer racing after it — that cooperative-writer
+        boundary is stated on ``reconcile_inflight_transactions``.
+        """
+        kind, digest = _inspect_live_path(path)
+        if kind == "other":
+            raise TransactionFailure(
+                f"canonical state changed during transaction apply: "
+                f"{_safe_relative(self.root, path)} is not a regular file"
+            )
+        live = digest if kind == "file" else None
+        allowed = {
+            _sha256_bytes(run.backups.get(path)),
+            _sha256_bytes(intended),
+        }
+        if live not in allowed:
+            raise TransactionFailure(
+                f"canonical state changed during transaction apply: "
+                f"{_safe_relative(self.root, path)}"
+            )
 
     def _apply(self, run: _CommitRun) -> None:
         for path, content in run.normalized_writes.items():
+            self._guard_apply(run, path, content)
             # Compare with the bytes already captured for rollback. Keep
             # scope/revision checks and receipt evidence for the complete
             # approved write set, but avoid replacing identical files.
@@ -1562,8 +1770,10 @@ class TransactionService:
         for path in run.delete_paths:
             if path.is_dir():
                 raise TransactionFailure(f"transaction refuses to delete directory: {path}")
+            self._guard_apply(run, path, None)
             with _engine_phase("apply"):
                 path.unlink(missing_ok=True)
+                _sync_directory(path.parent)
 
     def _validate(self, run: _CommitRun, validate_state, fingerprint) -> None:
         # Deduplicated post-commit fingerprint (#104 step 1): when the
@@ -1679,6 +1889,7 @@ class TransactionService:
             idempotency_content = _dump_idempotency_entries(
                 run.idempotency_entries
             ).encode("utf-8")
+            self._guard_apply(run, run.idempotency_path, idempotency_content)
             # The journal leads the mutation it describes: record the
             # after-image before these bytes land.
             _update_intent_after(
@@ -1775,8 +1986,14 @@ class TransactionService:
                 )
         if run.receipt_path.exists():
             raise TransactionFailure(f"receipt path already exists: {run.receipt_path}")
+        # Mark uncertainty BEFORE entering the operation that can expose
+        # the receipt: atomic_write_bytes makes the receipt visible at
+        # os.replace, before its parent-directory barrier returns. Any
+        # failure from here until the barrier returns is ambiguous, not a
+        # licence to roll back behind a possibly published receipt.
+        run.publication_state = PublicationState.PUBLICATION_UNCERTAIN
         atomic_write_bytes(run.receipt_path, _receipt_text(receipt).encode("utf-8"))
-        run.commit_reached = True
+        run.publication_state = PublicationState.DURABLE
         # The irrevocable point: receipt bytes are durable and the except
         # path below no longer rolls back. `core.transaction.committed`
         # names exactly this line, nothing earlier.
@@ -1799,6 +2016,7 @@ class TransactionService:
 
         try:
             shutil.rmtree(run.inflight_dir)
+            _sync_directory(run.inflight_dir.parent)
         except OSError as exc:
             raise TransactionFailure(f"transaction committed successfully but inflight journal cleanup failed: {exc}") from exc
 
@@ -1811,7 +2029,33 @@ class TransactionService:
         )
 
     def _failure(self, run: _CommitRun, exc: Exception, publish, rollback_publish) -> Exception | None:
-        if run.commit_reached:
+        if run.publication_state is PublicationState.PUBLICATION_UNCERTAIN:
+            # The receipt may already be visible. Distinguish this
+            # transaction's matching evidence from absence and from
+            # foreign/contradictory files: only proven absence means the
+            # publication boundary was never crossed and the guarded
+            # rollback below may still run. Anything else preserves the
+            # forward state and the journal for restart reconciliation.
+            verdict, _detail = _inspect_commit_receipt(
+                self.root,
+                {
+                    "transaction_id": run.transaction_id,
+                    "receipt_path": _safe_relative(self.root, run.receipt_path),
+                },
+            )
+            if verdict != "ABSENT":
+                diag_tracer.emit_event(
+                    diag_conventions.EVENT_STAGE_FAILED,
+                    stage="core.receipt", status="error",
+                    attrs={"error": "publication uncertain",
+                           "committed": "unknown"})
+                return TransactionPublicationUncertain(
+                    f"transaction receipt publication is uncertain: {exc}",
+                    transaction_id=run.transaction_id,
+                    receipt_path=_safe_relative(self.root, run.receipt_path),
+                )
+            run.publication_state = PublicationState.NOT_PUBLISHED
+        if run.publication_state is PublicationState.DURABLE:
             diag_tracer.emit_event(
                 diag_conventions.EVENT_STAGE_FAILED,
                 stage="core.commit", status="error",

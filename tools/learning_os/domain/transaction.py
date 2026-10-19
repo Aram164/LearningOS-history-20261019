@@ -4,7 +4,25 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+
+
+class PublicationState(Enum):
+    """Where one transaction's receipt stands in its publication run.
+
+    ``NOT_PUBLISHED``: the receipt cannot have been exposed yet, so an
+    ownership-guarded rollback is still allowed. ``PUBLICATION_UNCERTAIN``:
+    the operation that can expose the receipt has been entered but its
+    persistence barrier has not returned, so the receipt may be visible
+    without being proven durable — forward state and the journal must be
+    preserved. ``DURABLE``: the barrier returned; the commit is proven and
+    only post-commit bookkeeping can still fail.
+    """
+
+    NOT_PUBLISHED = "not_published"
+    PUBLICATION_UNCERTAIN = "publication_uncertain"
+    DURABLE = "durable"
 
 
 @dataclass(frozen=True)

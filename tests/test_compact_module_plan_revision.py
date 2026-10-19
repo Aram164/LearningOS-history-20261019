@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 import yaml
-from repo_builders import _audit, _compact_setup, run_los, write_yaml
+from repo_builders import _audit, _compact_setup, run_los, write_minimal_pdf, write_yaml
 
 from learning_os.app.validation_service import collect
 from learning_os.store.warning_baseline import write_baseline
 
 ROOT = Path(__file__).resolve().parents[1]
+PAPER_TEXT = "The expectation is the sum of each outcome multiplied by its probability."
 
 
 def _two_units(root: Path) -> None:
@@ -248,11 +250,21 @@ def _register_paper(root: Path) -> None:
     data["sources"].append({
         "id": "source-demo-paper", "title": "Demo Paper", "type": "paper",
         "authors": ["P. Apier"],
+        "material": "material://source-demo-paper/",
         "evaluations": [{"concepts": ["concept-expected-value"],
                          "roles": ["first-learning"], "level": "introductory",
                          "strengths": ["a crisp derivation"]}],
     })
     write_yaml(path, data)
+    material = root.parent / "materials/source-demo-paper/paper-02.pdf"
+    write_minimal_pdf(material, ["Introduction", PAPER_TEXT, "Derivation", "Example", "Conclusion"])
+    manifest_path = root / "records/materials-manifest.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["files"]["source-demo-paper/paper-02.pdf"] = {
+        "size": material.stat().st_size,
+        "sha256": hashlib.sha256(material.read_bytes()).hexdigest(),
+    }
+    write_yaml(manifest_path, manifest)
 
 
 def _join_revision(root: Path) -> dict:
@@ -275,7 +287,8 @@ def _join_revision(root: Path) -> dict:
         {"source_id": "source-demo-paper", "route": route}]
     revision["claim_evidence"] = [{
         "claim_id": "covers:route-demo-paper-l02",
-        "evidence": [{"kind": "route-locator", "ref": "paper-02.pdf"}],
+        "evidence": [{"kind": "quote", "ref": "material://source-demo-paper/paper-02.pdf",
+                      "page": 2, "text": PAPER_TEXT}],
     }]
     return revision
 
@@ -317,6 +330,142 @@ def test_source_join_adds_routes_and_patches_atomically(mini_repo, tmp_path):
     assert routes["route-demo-paper-l02"]["unit_id"] == "unit-demo-l02"
     assert repo.study_maps["study-map-demo-l01"].data["stages"][0]["title"] == \
         "First revised stage"
+
+
+def _third_unit(root: Path) -> None:
+    _two_units(root)
+    base = root / "curriculum/modules/module-demo"
+    module = yaml.safe_load((base / "module.yaml").read_text())
+    module["unit_order"].append("unit-demo-l03")
+    write_yaml(base / "module.yaml", module)
+    first = base / "units/unit-demo-l01"
+    third = base / "units/unit-demo-l03"
+    unit = yaml.safe_load((first / "unit.yaml").read_text())
+    unit.update(id="unit-demo-l03", title="Third lecture", order=3,
+                current_study_map="study-map-demo-l03")
+    write_yaml(third / "unit.yaml", unit)
+    study = yaml.safe_load((first / "study-map.yaml").read_text())
+    study.update(id="study-map-demo-l03", unit_id="unit-demo-l03",
+                 current_stage="stage-demo-l03")
+    study["stages"][0]["id"] = "stage-demo-l03"
+    study["stages"][0]["working_note"] = (
+        "curriculum/modules/module-demo/units/unit-demo-l03/"
+        "stages/stage-demo-l03/notes.md")
+    write_yaml(third / "study-map.yaml", study)
+    note = root / study["stages"][0]["working_note"]
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("", encoding="utf-8")
+    source_path = base / "source-map.yaml"
+    source_map = yaml.safe_load(source_path.read_text())
+    route = copy.deepcopy(source_map["sources"][0]["unit_routes"][0])
+    route.update(id="route-demo-book-l03", unit_id="unit-demo-l03")
+    source_map["sources"][0]["unit_routes"].append(route)
+    write_yaml(source_path, source_map)
+    workspace = root / "work/active/workspace-demo/CONTEXT.md"
+    workspace.write_text(workspace.read_text().replace(
+        "- unit-demo-l02", "- unit-demo-l02\n- unit-demo-l03"), encoding="utf-8")
+    _audit(root)
+    write_baseline(root, collect(root)[0], "three-unit compact revision fixture")
+
+
+def test_september_28_shaped_three_unit_revision_is_one_compact_cycle(
+        mini_repo, tmp_path):
+    """The 2026-09-28 complaint, reconstructed: one source joins a module,
+    gains routes, and stages are patched across three units — in one
+    compact input, one check, one reviewed apply, with no copied
+    unchanged records and no unrelated byte touched.
+    """
+    _third_unit(mini_repo)
+    _register_paper(mini_repo)
+    revision = _join_revision(mini_repo)
+    paper_route_l03 = copy.deepcopy(
+        revision["unit_revisions"][1]["route_changes"]["add"][0]["route"])
+    paper_route_l03.update(id="route-demo-paper-l03", unit_id="unit-demo-l03",
+                           title="Route route-demo-paper-l03")
+    revision["unit_revisions"].append({
+        "unit_id": "unit-demo-l03",
+        "route_changes": {
+            "update": [{"route_id": "route-demo-book-l03",
+                        "fields": {"angle": "Third revised angle."}}],
+            "add": [{"source_id": "source-demo-paper",
+                     "route": paper_route_l03}],
+        },
+        "stage_patches": [{"stage_id": "stage-demo-l03",
+                           "fields": {"title": "Third revised stage"}}],
+    })
+    revision["claim_evidence"].append({
+        "claim_id": "covers:route-demo-paper-l03",
+        "evidence": [{"kind": "quote",
+                      "ref": "material://source-demo-paper/paper-02.pdf",
+                      "page": 2, "text": PAPER_TEXT}],
+    })
+    draft = tmp_path / "compact.yaml"
+    write_yaml(draft, revision)
+
+    # The author submits changed rows only: no copied source records, no
+    # full study maps, nothing for units or fields that do not change.
+    submitted = yaml.safe_load(draft.read_text())
+    assert set(submitted) == {
+        "module_id", "plan_contract", "source_joins", "claim_evidence",
+        "unit_revisions"}
+    assert [row["unit_id"] for row in submitted["unit_revisions"]] == [
+        "unit-demo-l01", "unit-demo-l02", "unit-demo-l03"]
+    for row in submitted["unit_revisions"]:
+        assert set(row) <= {"unit_id", "route_changes", "stage_patches"}
+
+    def inventory() -> dict[str, bytes]:
+        return {
+            str(path.relative_to(mini_repo)): path.read_bytes()
+            for path in sorted(mini_repo.rglob("*"))
+            if path.is_file()
+            and "operations" not in path.parts
+            and ".git" not in path.parts
+        }
+
+    before = inventory()
+    checked = run_los(mini_repo, "module-plan-import", "module-demo",
+                      "--file", str(draft), "--check")
+    assert checked.returncode == 0, checked.stderr
+    report = json.loads(checked.stdout)
+    assert report["canonical_files_written"] == 0
+    assert set(report["units"]) == {
+        "unit-demo-l01", "unit-demo-l02", "unit-demo-l03"}
+    review = tmp_path / "review.json"
+    review.write_text(checked.stdout, encoding="utf-8")
+    applied = run_los(mini_repo, "module-plan-import", "module-demo",
+                      "--file", str(draft), "--review-report", str(review),
+                      "--apply-reviewed-sha256", report["reviewed_file_sha256"])
+    assert applied.returncode == 0, applied.stderr
+
+    (receipt_path,) = list(
+        (mini_repo / "operations/transactions").glob("transaction-*.yaml"))
+    receipt = yaml.safe_load(receipt_path.read_text())
+    assert receipt["capability"] == "module.plan.import"
+    after = inventory()
+    changed = {
+        relative for relative, data in after.items()
+        if before.get(relative) != data
+    } | {relative for relative in before if relative not in after}
+    receipt_writes = {row["path"] for row in receipt["writes"]}
+    # Generated projection output is derived, never canonical evidence.
+    derived = {rel for rel in changed if rel.startswith("generated/")}
+    assert changed - derived <= receipt_writes, (
+        f"bytes changed outside the receipt: {sorted(changed - derived - receipt_writes)}")
+    assert receipt_writes, "the one transaction must record its writes"
+
+    from learning_os.store.loader import load_repo
+    repo = load_repo(mini_repo)
+    entries = {entry["source_id"]: entry
+               for entry in repo.module_source_maps["module-demo"]["sources"]}
+    assert set(entries) == {"source-demo-book", "source-demo-paper"}
+    routes = {route["id"]: route for entry in entries.values()
+              for route in entry["unit_routes"]}
+    assert routes["route-demo-paper-l02"]["unit_id"] == "unit-demo-l02"
+    assert routes["route-demo-paper-l03"]["unit_id"] == "unit-demo-l03"
+    assert routes["route-demo-book-l03"]["angle"] == "Third revised angle."
+    for uid in ("l01", "l02", "l03"):
+        assert repo.study_maps[f"study-map-demo-{uid}"].data[
+            "stages"][0]["title"].endswith("revised stage")
 
 
 def test_source_join_refuses_unknown_and_repeated_sources(mini_repo, tmp_path):

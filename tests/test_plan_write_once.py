@@ -13,13 +13,21 @@ equivalence: every refusal survives with identical text.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
 
 import pytest
+import yaml
 from gateway_helpers import approved_v2_envelope
-from repo_builders import material_fixture, run_los, write_yaml
+from repo_builders import (
+    SLICED_LECTURE_TEXT,
+    material_fixture,
+    run_los,
+    write_minimal_pdf,
+    write_yaml,
+)
 from test_compact_module_plan_revision import _revision, _two_units
 
 import los
@@ -44,6 +52,24 @@ def cmd_module_plan_import(args) -> int:
 
 FUSED_LOCATOR = ("Lecture 2 — this tail is a very long sentence with many "
                  "words and no digits whatsoever in it")
+MATERIAL_URI = "material://source-demo-book/lecture-01.pdf"
+LINEAGE_ARTIFACT = "file:operations/transactions/lineage.yaml"
+
+
+def _validation_quote(root: Path, route_id: str) -> dict:
+    """Admit the material claim so the test can reach canonical validation."""
+    path = root.parent / "materials/source-demo-book/lecture-01.pdf"
+    write_minimal_pdf(path, [SLICED_LECTURE_TEXT])
+    manifest_path = root / "records/materials-manifest.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text()) if manifest_path.exists() else {"files": {}}
+    manifest.setdefault("files", {})["source-demo-book/lecture-01.pdf"] = {
+        "size": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+    write_yaml(manifest_path, manifest)
+    return {"claim_id": "covers:" + route_id,
+            "evidence": [{"kind": "quote", "ref": MATERIAL_URI,
+                          "page": 1, "text": SLICED_LECTURE_TEXT}]}
 
 
 def _count_validations(monkeypatch: pytest.MonkeyPatch) -> list:
@@ -93,7 +119,7 @@ def _compact_check_args(root: Path, draft: Path):
 
 
 def _route_patch_check_text(root: Path, unit_id: str, rid: str,
-                            changes: dict) -> str:
+                            changes: dict, claim_evidence: dict | None = None) -> str:
     """The --check refusal text, or "" when the check passes.
 
     route.patch runs through the registered pipeline, which renders a check
@@ -101,6 +127,7 @@ def _route_patch_check_text(root: Path, unit_id: str, rid: str,
     """
     args = argparse.Namespace(
         root=str(root), unit_id=unit_id, route_id=rid, changes=changes,
+        claim_evidence=claim_evidence,
         check=True, plan_sha256=None, expected_snapshot=None,
         expected_revision=[])
     outcome = ops_pipeline.run_cli(Path(root), "route.patch", args)
@@ -177,16 +204,19 @@ def test_route_patch_error_refusal_matches_check(mini_repo: Path, tmp_path: Path
                                                  capsys):
     repo, rid, smid = material_fixture(mini_repo)
     unit_id = repo.study_maps[smid].unit_id
-    changes = {"locator": FUSED_LOCATOR}
-    check_text = _route_patch_check_text(mini_repo, unit_id, rid, changes)
+    changes = {"locator": FUSED_LOCATOR, "vault_path": MATERIAL_URI}
+    evidence = _validation_quote(mini_repo, rid)
+    check_text = _route_patch_check_text(mini_repo, unit_id, rid, changes, evidence)
     assert "E LOCATOR-ANGLE-FUSED" in check_text
     capsys.readouterr()
     _, artifacts, _ = route_patch_plan(repo, unit_id, rid, changes)
     before = canonical_fingerprint(mini_repo)
     code, body = _apply_in_process(
         mini_repo, tmp_path, capability="route.patch",
-        payload={"unit_id": unit_id, "route_id": rid, "changes": changes},
-        artifact_ids=sorted(artifacts), key="refusal-error", capsys=capsys)
+        payload={"unit_id": unit_id, "route_id": rid, "changes": changes,
+                 "claim_evidence": evidence},
+        artifact_ids=sorted(set(artifacts) | {LINEAGE_ARTIFACT}),
+        key="refusal-error", capsys=capsys)
     assert code == 2
     assert body["ok"] is False
     assert body["error"]["code"] == "VALIDATION_FAILED"
@@ -232,8 +262,9 @@ def _precise_locator_fixture(mini_repo: Path):
 def test_route_patch_warning_refusal_matches_check(mini_repo: Path, tmp_path: Path,
                                                    capsys):
     unit_id, rid = _precise_locator_fixture(mini_repo)
-    changes = {"locator": "scattered remarks"}
-    check_text = _route_patch_check_text(mini_repo, unit_id, rid, changes)
+    changes = {"locator": "scattered remarks", "vault_path": MATERIAL_URI}
+    evidence = _validation_quote(mini_repo, rid)
+    check_text = _route_patch_check_text(mini_repo, unit_id, rid, changes, evidence)
     assert "NEW-OR-GROWN-WARNING" in check_text
     assert "LOCATOR-VAGUE" in check_text
     capsys.readouterr()
@@ -242,8 +273,10 @@ def test_route_patch_warning_refusal_matches_check(mini_repo: Path, tmp_path: Pa
     before = canonical_fingerprint(mini_repo)
     code, body = _apply_in_process(
         mini_repo, tmp_path, capability="route.patch",
-        payload={"unit_id": unit_id, "route_id": rid, "changes": changes},
-        artifact_ids=sorted(artifacts), key="refusal-warning", capsys=capsys)
+        payload={"unit_id": unit_id, "route_id": rid, "changes": changes,
+                 "claim_evidence": evidence},
+        artifact_ids=sorted(set(artifacts) | {LINEAGE_ARTIFACT}),
+        key="refusal-warning", capsys=capsys)
     assert code == 2
     assert body["ok"] is False
     assert body["error"]["code"] == "VALIDATION_FAILED"
@@ -285,6 +318,7 @@ def test_module_plan_error_refusal_matches_check(mini_repo: Path, tmp_path: Path
     import hashlib
 
     _two_units(mini_repo)
+    evidence = _validation_quote(mini_repo, "route-demo-book")
     clean_revision = _revision(mini_repo)
     clean_revision["unit_revisions"] = [clean_revision["unit_revisions"][0]]
     clean = tmp_path / "clean.yaml"
@@ -296,12 +330,13 @@ def test_module_plan_error_refusal_matches_check(mini_repo: Path, tmp_path: Path
         "unit_id": "unit-demo-l01",
         "route_changes": {"update": [{
             "route_id": "route-demo-book",
-            "fields": {"locator": FUSED_LOCATOR}}]},
+            "fields": {"locator": FUSED_LOCATOR, "vault_path": MATERIAL_URI}}]},
         # Same stage patch as the clean revision, so the same files —
         # and the same commit set — change.
         "stage_patches": [{"stage_id": "stage-demo",
                            "fields": {"title": "First revised stage"}}],
     }]
+    revision["claim_evidence"] = [evidence]
     draft = tmp_path / "fused.yaml"
     write_yaml(draft, revision)
     draft_sha = "sha256:" + hashlib.sha256(draft.read_bytes()).hexdigest()
@@ -310,14 +345,13 @@ def test_module_plan_error_refusal_matches_check(mini_repo: Path, tmp_path: Path
     assert "module plan validation preflight failed" in check_err
     assert "LOCATOR-ANGLE-FUSED" in check_err
     before = canonical_fingerprint(mini_repo)
-    # The fused update changes the same files as the clean one, so its
-    # commit set is the clean check's — a reviewed apply is impossible
-    # (a failing check prepares no envelope), hence the direct submit.
+    # The material claim adds the shared lineage guard to the clean commit
+    # set. A failing check prepares no envelope, hence the direct submit.
     code, body = _apply_in_process(
         mini_repo, tmp_path, capability="module.plan.import",
         payload={"module_id": "module-demo", "file": str(draft),
                  "file_sha256": draft_sha},
-        artifact_ids=clean_report["commit_artifact_ids"],
+        artifact_ids=sorted(set(clean_report["commit_artifact_ids"]) | {LINEAGE_ARTIFACT}),
         key="refusal-module-error", capsys=capsys)
     assert code == 1
     assert body["ok"] is False
@@ -334,8 +368,10 @@ def test_direct_apply_keeps_the_shadow_refusal_text(mini_repo: Path):
     """Without an envelope the apply still fails on the plan, not the gate."""
     repo, rid, smid = material_fixture(mini_repo)
     unit_id = repo.study_maps[smid].unit_id
+    evidence = _validation_quote(mini_repo, rid)
     probed = run_los(mini_repo, "route-patch", unit_id, rid,
-                     "--changes", json.dumps({"locator": FUSED_LOCATOR}))
+                     "--changes", json.dumps({"locator": FUSED_LOCATOR, "vault_path": MATERIAL_URI}),
+                     "--claim-evidence", json.dumps(evidence))
     assert probed.returncode == 2
     assert "canonical validation failed: E LOCATOR-ANGLE-FUSED" in probed.stderr
     assert "GatewayEnvelopeV2" not in probed.stderr

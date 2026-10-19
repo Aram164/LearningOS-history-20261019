@@ -32,6 +32,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from learning_os.store.materials.pdf_text import PDFTextError, pdf_page_text, pdf_reader
 from learning_os.store.materials.resolution import (
     MATERIAL_RESOURCE_SUFFIXES,
     MATERIAL_SCHEME,
@@ -43,6 +44,7 @@ from learning_os.store.materials.resolution import (
     resolve_route_material_files,
     route_material_checksum,
     safe_material_locator,
+    sha256_bytes,
     sha256_file,
 )
 
@@ -328,30 +330,28 @@ def _select_pages(total: int, requested: list[tuple[int, int]]) -> tuple[tuple[i
 
 def _read_pdf_part(route_id: str, material_uri: str, path: Path, locator: str) -> SlicePart:
     try:
-        import pypdf
-    except ImportError as exc:
-        raise SliceResolutionError(
-            route_id, "pypdf is required for PDF slices: make setup") from exc
-    try:
-        reader = pypdf.PdfReader(str(path))
+        content = path.read_bytes()
+        reader = pdf_reader(content)
         total = len(reader.pages)
     except Exception as exc:
         raise SliceResolutionError(
             route_id, f"its file cannot be parsed as PDF: {exc}") from exc
     pages, status = _select_pages(total, parse_locator_page_ranges(locator))
-    return _pdf_part_for_pages(route_id, material_uri, path, reader, total, pages, status)
+    return _pdf_part_for_pages(route_id, material_uri, reader, total, pages, status,
+                               sha256_bytes(content))
 
 
-def _pdf_part_for_pages(route_id: str, material_uri: str, path: Path, reader: Any,
-                        total: int, pages: tuple[int, ...], status: str) -> SlicePart:
+def _pdf_part_for_pages(route_id: str, material_uri: str, reader: Any,
+                        total: int, pages: tuple[int, ...], status: str,
+                        file_sha256: str) -> SlicePart:
     if status == "out-of-range":
         raise SliceResolutionError(route_id, f"requested locator pages are outside this {total}-page file")
     raw: list[tuple[int, str]] = []
     for page in pages:
         try:
-            text = reader.pages[page - 1].extract_text() or ""
-        except Exception:
-            text = ""
+            text = pdf_page_text(reader, page)
+        except PDFTextError as exc:
+            raise SliceResolutionError(route_id, str(exc)) from exc
         raw.append((page, text))
     if not any(text.strip() for _, text in raw):
         raise SliceResolutionError(route_id, "its file yields no extractable text")
@@ -363,7 +363,7 @@ def _pdf_part_for_pages(route_id: str, material_uri: str, path: Path, reader: An
         page_total=total,
         status=status,
         text="".join(chunks),
-        file_sha256=sha256_file(path),
+        file_sha256=file_sha256,
     )
 
 
@@ -715,12 +715,8 @@ def plan_continuation(
             "its material changed since pass 1; re-prepare the request instead of continuing",
         )
     try:
-        import pypdf
-    except ImportError as exc:
-        raise ContinuationError(
-            route_id, "pypdf is required for PDF slices: make setup") from exc
-    try:
-        reader = pypdf.PdfReader(str(resolved.path))
+        observed_content = resolved.path.read_bytes()
+        reader = pdf_reader(observed_content)
         total = len(reader.pages)
     except Exception as exc:
         raise ContinuationError(
@@ -735,8 +731,8 @@ def plan_continuation(
             f"pages {start}-{end} were already inspected; "
             "a continuation must name unread pages")
     try:
-        part = _pdf_part_for_pages(route_id, resolved.material_uri, resolved.path,
-                                   reader, total, pages, "complete")
+        part = _pdf_part_for_pages(route_id, resolved.material_uri,
+                                   reader, total, pages, "complete", sha256_bytes(observed_content))
     except SliceResolutionError as exc:
         raise ContinuationError(route_id, "its pages yield no extractable text") from exc
     pending = MaterialSlice(

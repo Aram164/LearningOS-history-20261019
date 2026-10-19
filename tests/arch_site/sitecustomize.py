@@ -6,6 +6,13 @@ from pathlib import Path
 
 _here = Path(__file__).resolve().parent
 _tests = _here.parent
+# The audit installer imports production modules before Python starts the
+# requested script. Pin this harness's checkout first: a shared editable venv
+# may otherwise preload a different worktree and invalidate every witness.
+_tools = _tests.parent / "tools"
+if str(_tools) in sys.path:
+    sys.path.remove(str(_tools))
+sys.path.insert(0, str(_tools))
 if str(_tests) not in sys.path:
     sys.path.insert(0, str(_tests))
 

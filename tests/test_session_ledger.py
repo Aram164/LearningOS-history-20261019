@@ -275,6 +275,7 @@ def test_goal_session_id_flag_overrides_the_environment(mini_repo, monkeypatch):
     monkeypatch.setenv("LOS_SESSION_ID", "env-session")
     (goal_id,) = seed_live_goal_ids(mini_repo, "flag-wins")
     decided = run_los(mini_repo, "goal", goal_id, "--reject",
+                      "--note", "Explicit-session ownership test.",
                       "--session-id", "explicit-session")
     assert decided.returncode == 0, decided.stderr
     explicit = session_store.load_session_paths(mini_repo, "explicit-session")
@@ -313,7 +314,8 @@ def test_goal_write_while_own_session_unpushed_refuses(
     before_ledger = session_store.session_ledger(
         mini_repo, "goal-session").read_bytes()
 
-    refused = run_los(mini_repo, "goal", goal_id, "--reject")
+    refused = run_los(mini_repo, "goal", goal_id, "--reject",
+                      "--note", "Unpushed-session refusal test.")
     assert refused.returncode == 2, refused.stdout
     assert refused.stderr == (
         f"los: INVALID_REQUEST: already committed as {sha}; use --push or --close\n")
@@ -333,6 +335,7 @@ def test_goal_write_in_another_explicit_session_while_ambient_unpushed(
         mini_repo, "goal-session").read_bytes()
 
     decided = run_los(mini_repo, "goal", goal_id, "--reject",
+                      "--note", "Independent-session ownership test.",
                       "--session-id", "goal-other")
     assert decided.returncode == 0, decided.stderr
     other = session_store.load_session_paths(mini_repo, "goal-other")

@@ -179,16 +179,24 @@ def prepare_dispatch(
     envelope: dict,
     payload: dict,
     *,
-    parser_factory,
+    parser_factory=None,
 ):
     """Shared gateway admission for legacy and registered dispatch (SPEC 11.2 K1).
 
     Refuses misplaced approval and content-bound file payloads, validates
-    the payload, resolves the subparser and handler, and builds the
-    namespace with parser defaults and the envelope guards. Returns
-    (command_parser, namespace).
+    the payload, and builds the namespace with the envelope guards.
+    Admission derives the namespace from the request schema — it never
+    constructs a CLI parser. Only legacy dispatch passes a
+    ``parser_factory`` (built by the adapters that own CLI parsing) to
+    resolve the named command's handler; its namespace then comes from
+    that same parser, exactly as before. Returns
+    (command_parser, namespace); the parser is None on the schema path.
     """
-    from learning_os.store.contracts.payloads import payload_to_namespace, subparsers
+    from learning_os.store.contracts.payloads import (
+        payload_to_namespace,
+        payload_to_namespace_from_schema,
+        subparsers,
+    )
 
     if envelope.get("schema_version") == 2 and "approve" in payload:
         raise WriteRefused(
@@ -202,20 +210,29 @@ def prepare_dispatch(
             "approval is bound to the exact content"
         )
     validate_payload(root, definition.name, payload)
-    commands = subparsers(parser_factory())
-    command_parser = commands.get(definition.cli_command or "")
-    if command_parser is None:
-        raise WriteRefused(f"capability {definition.name} declares no CLI command to dispatch to")
-    handler = command_parser.get_default("func")
-    if handler is None:
-        raise WriteRefused(f"capability {definition.name} has no bound handler")
+    if parser_factory is None:
+        namespace = payload_to_namespace_from_schema(
+            root, definition.name, payload,
+            root=str(root),
+            expected_snapshot=envelope.get("expected_snapshot"),
+            expected_revisions=envelope.get("expected_revisions", {}),
+        )
+        command_parser = None
+    else:
+        commands = subparsers(parser_factory())
+        command_parser = commands.get(definition.cli_command or "")
+        if command_parser is None:
+            raise WriteRefused(f"capability {definition.name} declares no CLI command to dispatch to")
+        handler = command_parser.get_default("func")
+        if handler is None:
+            raise WriteRefused(f"capability {definition.name} has no bound handler")
 
-    namespace = payload_to_namespace(
-        command_parser, payload,
-        root=str(root),
-        expected_snapshot=envelope.get("expected_snapshot"),
-        expected_revisions=envelope.get("expected_revisions", {}),
-    )
+        namespace = payload_to_namespace(
+            command_parser, payload,
+            root=str(root),
+            expected_snapshot=envelope.get("expected_snapshot"),
+            expected_revisions=envelope.get("expected_revisions", {}),
+        )
     # A validated V2 envelope has already bound an approved user gesture to
     # the exact intent hash.  Requiring an unrelated payload boolean would
     # create two approval authorities that can disagree.  V1 keeps its legacy
@@ -264,7 +281,8 @@ def dispatch(
         result = {"error": complaint or text or f"{definition.name} failed"}
         refusal = _take_gateway_refusal()
         if refusal is not None:
-            result["error_code"], result["error_retryable"] = refusal
+            result["error_code"] = refusal.code
+            result["error_retryable"] = refusal.retryable
         return code, result
     _take_gateway_refusal()
     if not text:

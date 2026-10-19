@@ -79,7 +79,7 @@ SPECIAL_KINDS: tuple[str, ...] = (
 
 #: Amendment (q)'s goal regex, exactly.
 EXPECTED_GOAL_PATTERN = (
-    r"^(?:lineage-stale|study-map-obligation|evidence-superseded):\S+$"
+    r"^(?:lineage-stale|study-map-obligation|evidence-superseded|claims-needing-review|claims-audit|repeated-question-gap|inspection-without-dossier|reviewer-correction-pattern):\S+$"
 )
 
 
@@ -143,17 +143,17 @@ def test_generic_patterns_match_schemas():
 
 def test_goal_alternation_matches_scan_detectors():
     assert KINDS["goal"].pattern.pattern == EXPECTED_GOAL_PATTERN
-    tree = ast.parse((ROOT / "tools/learning_os/derive/semantics/scan.py").read_text(
-        encoding="utf-8"))
-    detectors = {
-        node.args[1].value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        and node.func.id == "_emit" and len(node.args) >= 2
-        and isinstance(node.args[1], ast.Constant)
-        and isinstance(node.args[1].value, str)
-    }
-    assert detectors, "no _emit detectors found in semantics/scan.py"
+    detectors = set()
+    for name, argument in (("scan.py", 1), ("goals.py", 0)):
+        tree = ast.parse((ROOT / "tools/learning_os/derive/semantics" / name).read_text())
+        detectors.update(node.args[argument].value for node in ast.walk(tree)
+                         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                         and node.func.id == "_emit" and len(node.args) > argument
+                         and isinstance(node.args[argument], ast.Constant)
+                         and isinstance(node.args[argument].value, str))
+    # Claim findings choose one of these literal detectors from shared status.
+    detectors.update({"lineage-stale", "claims-needing-review"})
+    assert detectors
     alternation = set(
         EXPECTED_GOAL_PATTERN.split("(?:")[1].split(")")[0].split("|"))
     assert alternation == detectors, (

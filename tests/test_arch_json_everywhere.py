@@ -32,6 +32,8 @@ import arch_surface
 import pytest
 import yaml
 from arch_schema_deltas import (
+    _before_approved_c1_cli,
+    _before_approved_c1_schema,
     _restore_phase6_descriptions,
     _strip_approved_owner_metadata,
     _strip_bf_description_updates,
@@ -201,7 +203,7 @@ def _assert_only_json_added_to_surface_entries(
     for key in sorted(new_cli):
         assert key in base_flat and key in live_flat, key
         old = {json.dumps(a, sort_keys=True) for a in base_flat[key]}
-        new = {json.dumps(a, sort_keys=True) for a in live_flat[key]}
+        new = {json.dumps(a, sort_keys=True) for a in _before_approved_c1_cli(key, live_flat[key])}
         assert old < new, f"{key}: not a pure addition"
         assert new - old == {json.dumps(JSON_ACTION, sort_keys=True)}, key
 
@@ -259,7 +261,7 @@ def _assert_only_json_added_to_request_schemas(
         current_fname = _current_schema_filename(fname)
         operation = current_fname.removesuffix(".schema.json")
         old = json.loads(_git_show(base, rel))
-        new = json.loads((REQUESTS_DIR / _current_schema_filename(fname)).read_text(encoding="utf-8"))
+        new = _before_approved_c1_schema(operation, (REQUESTS_DIR / current_fname).read_bytes())
         if current_fname != fname:
             old["$id"] = "learningos/requests/" + operation
         old, new = _strip_approved_owner_metadata(operation, old, new)

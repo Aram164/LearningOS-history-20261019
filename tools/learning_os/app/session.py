@@ -10,16 +10,20 @@ refusals raise the machine's `WriteRefused` subclasses; the thin
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import os
+import re
 import subprocess
 from pathlib import Path
 
 from learning_os.app.projection import publish as _publish
 from learning_os.app.validation import validation_run
+from learning_os.domain.failures import ReplayRecoveryError as _ReplayRecoveryError
 from learning_os.domain.failures import ToolFailure, WriteRefused
+from learning_os.domain.transaction import TransactionResult
 from learning_os.store import observations
 from learning_os.store.contracts.gateway import GATEWAY_CHANNELS
-from learning_os.store.evidence import shared_ledgers_proven_since
+from learning_os.store.evidence import shared_ledgers_canonical, shared_ledgers_proven_since
 from learning_os.store.session_ledger import SESSION_LEDGER_STALE_HOURS
 from learning_os.store.session_ledger import close_session_ledger as _close_session_ledger
 from learning_os.store.session_ledger import current_session_id as _current_session_id
@@ -28,10 +32,13 @@ from learning_os.store.session_ledger import (
     load_other_session_ledgers as _load_other_session_ledgers,
 )
 from learning_os.store.session_ledger import load_session_ledger as _load_session_ledger
+from learning_os.store.session_ledger import receipt_released as _receipt_released
 from learning_os.store.session_ledger import row_is_stale as _row_is_stale
 from learning_os.store.session_ledger import row_proven_state as _row_proven_state
 from learning_os.store.session_ledger import row_recorded_at as _row_recorded_at
+from learning_os.store.session_ledger import session_ledger as _session_ledger
 from learning_os.store.session_ledger import session_path_state as _session_path_state
+from learning_os.store.session_ledger import stamp_session_row as _stamp_session_row
 from learning_os.store.session_ledger import write_session_ledger as _write_session_ledger
 
 TOOLS = Path(__file__).resolve().parent.parent.parent
@@ -376,3 +383,237 @@ def session_end(root: Path, *, channel: str | None, session_id: str | None,
     _delete_session_ledger(root, own_session)
     payload["session_closed"] = True
     return payload
+
+
+# only carry forward a *prior* row this session already proved by directly
+# observing its own fresh write, never assert one from scratch.
+UNPROVABLE_AGGREGATE_LEDGERS = (
+    "operations/transactions/revisions.yaml",
+    "operations/transactions/idempotency.yaml",
+)
+
+
+def _is_receipt_committed_in_head(root: Path, receipt_relative: str,
+                                  receipt_bytes: bytes) -> bool:
+    if not (root / ".git").exists():
+        return False
+    env = {
+        key: value for key, value in os.environ.items()
+        if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"}
+    }
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "-p", f"HEAD:{receipt_relative}"],
+            capture_output=True, timeout=10,
+            env={**env, "GIT_OPTIONAL_LOCKS": "0"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0 and proc.stdout == receipt_bytes
+
+
+def repair_replayed_session_ownership(root: Path,
+                                       replay: TransactionResult,
+                                       session_id: str | None = None) -> None:
+    """Rebuild ephemeral session ownership from the already-validated receipt.
+
+    A process can die after Receipt V2 and the idempotency ledger are durable
+    but before the temporary learning-session ledger is written.  Exact replay
+    is the recovery boundary, so it also repairs that bookkeeping; otherwise
+    the UI would retire its durable record while ``session-end`` forgot the
+    canonical file the recovered gesture authored.
+
+    This must never simply re-observe the current filesystem and adopt it as
+    the ownership claim: an out-of-band edit between the original commit and
+    this replay would then be laundered into the session's own authorship, and
+    ``session-end`` would happily stage and commit it as though the gateway
+    transaction had written it. Every claim made here is instead the
+    *authored* state Receipt V2 itself proves — ``writes[].sha256_after``, or
+    absence when it is ``null`` (each path already proven safe and canonical
+    by ``replay_for_request``), plus the receipt's own bytes, which this
+    function reads and hashes itself rather than trusting a second party's
+    claim about them. That authored state is compared against the live file;
+    a mismatch anywhere refuses the whole repair before a single byte of the
+    ownership ledger is written, so an existing row is never overwritten with
+    a laundered observation and no replacement ledger is created from an
+    unproven one. A replay whose write is already accounted for — its rows
+    in the session ledger, its receipt committed to Git HEAD or released by
+    `session-end --close` — repairs nothing and so compares nothing.
+    """
+    receipt = replay.receipt
+    if not isinstance(receipt, dict):
+        raise _ReplayRecoveryError(
+            "cannot repair session ownership: replayed evidence carries no receipt"
+        )
+    writes = receipt.get("writes")
+    if not isinstance(writes, list):
+        raise _ReplayRecoveryError(
+            "cannot repair session ownership: replayed receipt writes are malformed"
+        )
+
+    authored: dict[str, dict[str, str]] = {}
+    for row in writes:
+        relative = row.get("path") if isinstance(row, dict) else None
+        if not isinstance(relative, str) or not relative:
+            raise _ReplayRecoveryError(
+                "cannot repair session ownership: replayed receipt path is unsafe"
+            )
+        sha_after = row.get("sha256_after") if isinstance(row, dict) else None
+        if sha_after is None:
+            authored[relative] = {"state": "absent"}
+        elif isinstance(sha_after, str) and re.fullmatch(r"[0-9a-f]{64}", sha_after):
+            authored[relative] = {"state": "file", "sha256": sha_after}
+        else:
+            raise _ReplayRecoveryError(
+                "cannot repair session ownership: replayed receipt write has an "
+                "unproven authored state"
+            )
+
+    try:
+        receipt_bytes = replay.receipt_path.read_bytes()
+        receipt_relative = replay.receipt_path.resolve().relative_to(
+            root.resolve()
+        ).as_posix()
+    except (OSError, ValueError) as exc:
+        raise _ReplayRecoveryError(
+            f"cannot repair session ownership: {exc}"
+        ) from exc
+    authored[receipt_relative] = {
+        "state": "file", "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+    }
+
+    # The repair runs outside any gateway request context, so ambient
+    # session resolution would land in the default channel's ledger — not
+    # the one the original write recorded. The replayed envelope's sealed
+    # session recovers exactly that ledger; without one, the receipt names
+    # the writing channel, which recovers the channel ledger when no
+    # session is named. A named session still wins: that session is
+    # performing the recovery.
+    origin = receipt.get("request") if isinstance(receipt, dict) else None
+    origin = origin.get("channel") if isinstance(origin, dict) else None
+    if not isinstance(origin, str) or not origin:
+        origin = None
+    session = _current_session_id(channel=origin, explicit=session_id)
+
+    # Nothing is left to repair once the ownership window this write belongs
+    # to has ended: session-end --commit-message committed this exact receipt
+    # to Git HEAD (ownership retired into history; verify the shared ledgers
+    # remain canonically serialized and leave the closed session closed), or
+    # session-end --close released it. Later transactions may have changed
+    # or moved any path it wrote since, so the live tree proves nothing here,
+    # and nothing is written.
+    receipt_sha256 = authored[receipt_relative]["sha256"]
+    in_head = _is_receipt_committed_in_head(root, receipt_relative, receipt_bytes)
+    if not _session_ledger(root, session).is_file():
+        if in_head:
+            if not shared_ledgers_canonical(root):
+                raise _ReplayRecoveryError(
+                    "cannot repair session ownership: "
+                    "operations/transactions/revisions.yaml changed since its recorded transaction"
+                )
+            return
+        if _receipt_released(root, session, receipt_relative, receipt_sha256):
+            return
+        raise _ReplayRecoveryError(
+            "cannot repair session ownership: the session ledger is gone, and this "
+            "receipt cannot prove the bytes of the shared revision and idempotency "
+            "ledgers — reconcile this transaction by hand"
+        )
+    try:
+        envelope = _load_session_ledger(root, session)
+    except WriteRefused as exc:
+        raise _ReplayRecoveryError(
+            f"cannot repair session ownership: {exc}"
+        ) from exc
+    assert envelope is not None  # the missing ledger failed closed above
+    existing = envelope["paths"]
+
+    # The original write's bookkeeping already ran: it records the receipt
+    # together with every path the receipt wrote in one atomic ledger write,
+    # so those rows stand and nothing is written. A later gateway write may
+    # since have moved a path on — its own bookkeeping then proves the live
+    # bytes in a session ledger — but bytes no ledger proves are an
+    # out-of-band edit, and the replay still refuses rather than confirm it.
+    if receipt_relative in existing:
+        # The shared ledgers carry this write's rows only as part of the
+        # whole file, so their proof is the session's recorded row.
+        checks = dict(authored)
+        for ledger_relative in UNPROVABLE_AGGREGATE_LEDGERS:
+            if ledger_relative in existing:
+                checks.setdefault(ledger_relative, existing[ledger_relative])
+        ledgers = [existing, *_load_other_session_ledgers(root, session).values()]
+        shared_proven: bool | None = None
+        for relative, state in checks.items():
+            live = _session_path_state(root, relative)
+            if live == _row_proven_state(state) or any(
+                    isinstance(rows.get(relative), dict)
+                    and live == _row_proven_state(rows[relative])
+                    for rows in ledgers):
+                continue
+            if relative in UNPROVABLE_AGGREGATE_LEDGERS:
+                if shared_proven is None:
+                    shared_proven = shared_ledgers_proven_since(
+                        root,
+                        revisions_sha256=(existing.get("operations/transactions/revisions.yaml") or {}).get("sha256"),
+                        idempotency_sha256=(existing.get("operations/transactions/idempotency.yaml") or {}).get("sha256"),
+                    )
+                if shared_proven:
+                    continue
+            raise _ReplayRecoveryError(
+                "cannot repair session ownership: "
+                f"{relative} changed since its recorded transaction"
+            )
+        return
+    if in_head and shared_ledgers_canonical(root):
+        return
+    if _receipt_released(root, session, receipt_relative, receipt_sha256):
+        return
+
+    actor = origin or "unknown"
+    shared_proven = shared_ledgers_proven_since(
+        root,
+        revisions_sha256=(existing.get("operations/transactions/revisions.yaml") or {}).get("sha256"),
+        idempotency_sha256=(existing.get("operations/transactions/idempotency.yaml") or {}).get("sha256"),
+    )
+    for ledger_relative in UNPROVABLE_AGGREGATE_LEDGERS:
+        proven = existing.get(ledger_relative)
+        if proven is not None:
+            if (
+                _session_path_state(root, ledger_relative) != _row_proven_state(proven)
+                and shared_proven
+            ):
+                authored[ledger_relative] = _stamp_session_row(
+                    root, ledger_relative, actor
+                )
+            else:
+                authored[ledger_relative] = proven
+
+    for relative, state in authored.items():
+        if _session_path_state(root, relative) != _row_proven_state(state):
+            if relative in UNPROVABLE_AGGREGATE_LEDGERS and shared_proven:
+                continue
+            raise _ReplayRecoveryError(
+                "cannot repair session ownership: "
+                f"{relative} changed since its recorded transaction"
+            )
+
+    merged = dict(existing)
+    merged.update(authored)
+    for relative, state in merged.items():
+        if state.get("channel") and state.get("recorded_at"):
+            continue
+        state["channel"] = actor
+        state["recorded_at"] = _stamp_session_row(
+            root, relative, actor)["recorded_at"]
+    try:
+        # The repair keeps the envelope it found: a replay re-proves the
+        # recorded bytes, so it neither bumps the version nor disturbs the
+        # state, the witness or the recorded SHA.
+        _write_session_ledger(
+            root, merged, session, version=envelope["version"],
+            state=envelope["state"], review=envelope["review"],
+            commit_sha=envelope["commit_sha"])
+    except WriteRefused as exc:
+        raise _ReplayRecoveryError(
+            f"cannot repair replayed session ownership: {exc}"
+        ) from exc

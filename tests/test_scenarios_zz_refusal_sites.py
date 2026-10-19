@@ -2327,7 +2327,7 @@ def _prove_intelligence_git_history(mini_repo: Path, tmp_path: Path,
     ctx = _a9_world("intelligence.scan", "scan-text", tmp_path)
     root = ctx.root
 
-    def boom(root, days=None, feed=None):
+    def boom(root, days=None, feed=None, *, goal_ledger=None):
         raise GitHistoryError("a9-proof: git is corrupt")
 
     monkeypatch.setattr(reads, "ranked_scan", boom)
@@ -2357,7 +2357,7 @@ def _prove_intelligence_unrankable_queue(mini_repo: Path, tmp_path: Path,
     ctx = _a9_world("intelligence.scan", "scan-text", tmp_path)
     root = ctx.root
 
-    def boom(root, days=None, feed=None):
+    def boom(root, days=None, feed=None, *, goal_ledger=None):
         raise ValueError("a9-proof: the queue is malformed")
 
     monkeypatch.setattr(reads, "ranked_scan", boom)

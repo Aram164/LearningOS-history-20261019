@@ -10,17 +10,19 @@ as the canonical mutation.
 from __future__ import annotations
 
 import sys
-import types
 from pathlib import Path
 
 import yaml
 
-from learning_os.app.handlers.plan import _phaseB_ledger_text, _phaseB_validate
+from learning_os.app.claim_admission import prepare_claim_admission as _phaseB_validate
+from learning_os.app.claim_admission import render_claim_lineage as _phaseB_ledger_text
 from learning_os.derive.semantics.lineage import load_ledger
+from learning_os.domain.snapshot import Repo
 from learning_os.store.contracts.gateway import (
     GatewayRequestContext,
     gateway_request_context,
 )
+from learning_os.store.materials.resolution import stable_checksum
 from learning_os.store.revisions import dump_revisions
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,7 +51,7 @@ def _map(*routes):
 
 
 def _repo(live_map):
-    return types.SimpleNamespace(module_source_maps={"module-demo": live_map})
+    return Repo(root=Path("/__synthetic_phaseB__/repository"), sources={"source-demo-book": {"id": "source-demo-book"}}, module_source_maps={"module-demo": live_map})
 
 
 def _root_with_revisions(tmp_path, revisions):
@@ -189,6 +191,7 @@ def test_manifest_evidence_binds_its_digest(tmp_path):
 
     package_route = package["source_map"]["sources"][0]["unit_routes"][0]
     assert dict(record.derived_from.source_hashes) == {
+        "source-material:source-demo-book": stable_checksum({"material": None}),
         "manifest:book/demo.pdf": "abc",
         # The fixture stub carries no knowledge nodes, so the covered n1/n3
         # earn no keys — only the route row itself is pinned.
@@ -342,7 +345,7 @@ def test_end_to_end_apply_persists_lineage_atomically(mini_repo, tmp_path):
     applied = approved_v2_cli(
         mini_repo, "module-plan-import", "module-demo",
         "--file", str(package), "--file-sha256", file_sha256(package),
-        artifact_ids=["module-demo", "unit-demo-l01"],
+        artifact_ids=["module-demo", "unit-demo-l01", "file:operations/transactions/lineage.yaml"],
         idempotency_key="phaseB-e2e-atomic",
     )
     assert applied.returncode == 0, applied.stderr
@@ -443,6 +446,8 @@ def _apply_in_process(mini_repo, package, key, request_id):
         f"module-demo={revisions.get('module-demo', 0)}",
         "--expected-revision",
         f"unit-demo-l01={revisions.get('unit-demo-l01', 0)}",
+        "--expected-revision",
+        f"file:operations/transactions/lineage.yaml={revisions.get('file:operations/transactions/lineage.yaml', 0)}",
     ])
     request = GatewayRequestContext(
         request_id=request_id,
@@ -575,6 +580,7 @@ def test_package_units_are_not_stamped_but_their_nodes_are_pinned(tmp_path):
     assert dict(record.derived_from.revisions) == {}
     package_route = package["source_map"]["sources"][0]["unit_routes"][0]
     assert dict(record.derived_from.source_hashes) == {
+        "source-material:source-demo-book": stable_checksum({"material": None}),
         "route-content:route-keep": route_content_digest(
             module_id="module-demo", source_id="source-demo-book",
             route=package_route),
@@ -636,6 +642,7 @@ def test_batch_import_scopes_each_claim_to_its_own_route(tmp_path):
         # each claim reads only its own route and its own covered nodes.
         assert dict(record.derived_from.revisions) == {}
         assert dict(record.derived_from.source_hashes) == {
+        "source-material:source-demo-book": stable_checksum({"material": None}),
             f"route-content:{rid}": route_content_digest(
                 module_id="module-demo", source_id="source-demo-book",
                 route=package_rows[rid]),
@@ -646,9 +653,9 @@ def test_batch_import_scopes_each_claim_to_its_own_route(tmp_path):
 
 def test_manifest_digest_mutation_stales_and_missing_fails_closed(tmp_path):
 
+    from learning_os.derive.semantics.claim_status import live_evidence_digest
     from learning_os.derive.semantics.lineage import refresh
     from learning_os.derive.semantics.predicates import CONTRACT_VERSION
-    from learning_os.derive.semantics.scan import live_evidence_digest
 
     root = _root_with_revisions(tmp_path, REVS)
     (root / "records").mkdir(parents=True, exist_ok=True)
@@ -669,12 +676,14 @@ def test_manifest_digest_mutation_stales_and_missing_fails_closed(tmp_path):
     # The route row never moves in this test; only the manifest entry does.
     route_live = {
         key: value for key, value in dict(record.derived_from.source_hashes).items()
-        if key.startswith("route-content:")
+        if key.startswith(("route-content:", "source-material:"))
     }
-    assert len(route_live) == 1
+    assert len(route_live) == 2
 
     def _live():
-        from learning_os.derive.semantics.scan import scan_manifest_files as _scan_manifest_files
+        from learning_os.derive.semantics.claim_status import (
+            scan_manifest_files as _scan_manifest_files,
+        )
 
         files = _scan_manifest_files(root)
         digest = live_evidence_digest(root, "manifest:book/demo.pdf", files)
@@ -697,9 +706,9 @@ def test_manifest_digest_mutation_stales_and_missing_fails_closed(tmp_path):
 def test_file_bytes_mutation_stales_and_unrelated_unchanged(tmp_path):
     import hashlib as _hashlib
 
+    from learning_os.derive.semantics.claim_status import live_evidence_digest
     from learning_os.derive.semantics.lineage import refresh
     from learning_os.derive.semantics.predicates import CONTRACT_VERSION
-    from learning_os.derive.semantics.scan import live_evidence_digest
 
     root = _root_with_revisions(tmp_path, REVS)
     target = root / "work" / "evidence.md"
@@ -722,13 +731,15 @@ def test_file_bytes_mutation_stales_and_unrelated_unchanged(tmp_path):
     assert stored["file:work/evidence.md"] == expected
     route_live = {
         key: value for key, value in stored.items()
-        if key.startswith("route-content:")
+        if key.startswith(("route-content:", "source-material:"))
     }
-    assert len(route_live) == 1
+    assert len(route_live) == 2
     post = {"module-demo": 4, "unit-demo-l01": 2}
 
     def _live_for(key):
-        from learning_os.derive.semantics.scan import scan_manifest_files as _scan_manifest_files
+        from learning_os.derive.semantics.claim_status import (
+            scan_manifest_files as _scan_manifest_files,
+        )
 
         digest = live_evidence_digest(root, key, _scan_manifest_files(root))
         live = dict(route_live)
@@ -813,7 +824,7 @@ def test_post_commit_supported_end_to_end_via_gateway(mini_repo, tmp_path):
     applied = approved_v2_cli(
         mini_repo, "module-plan-import", "module-demo",
         "--file", str(package), "--file-sha256", file_sha256(package),
-        artifact_ids=["module-demo", "unit-demo-l01"],
+        artifact_ids=["module-demo", "unit-demo-l01", "file:operations/transactions/lineage.yaml"],
         idempotency_key="phaseB-e2e-post-commit-supported",
     )
     assert applied.returncode == 0, applied.stderr
@@ -859,7 +870,7 @@ def test_post_commit_supported_end_to_end_via_gateway(mini_repo, tmp_path):
     removed = approved_v2_cli(
         mini_repo, "module-plan-import", "module-demo",
         "--file", str(package), "--file-sha256", file_sha256(package),
-        artifact_ids=["module-demo", "unit-demo-l01"],
+        artifact_ids=["module-demo", "unit-demo-l01", "file:operations/transactions/lineage.yaml"],
         idempotency_key="phaseB-e2e-removal-only",
     )
     assert removed.returncode == 0, removed.stderr

@@ -38,6 +38,7 @@ from jsonschema import Draft202012Validator
 
 from learning_os.derive.semantics.predicates import CONTRACT_VERSION, claim_stale
 from learning_os.domain.route_identity import route_with_identity
+from learning_os.store.loading.yamlio import LoaderError, load_yaml
 
 #: The receipt-adjacent sidecar. Canonical records never carry lineage;
 #: the manifest never projects it.
@@ -847,11 +848,11 @@ def check_assumptions(records: Mapping[str, ClaimLineage]) -> None:
 def load_ledger(root: Path) -> dict[str, ClaimLineage]:
     """Read the sidecar. A missing ledger is an empty one — lazy backfill."""
     path = root / LEDGER_RELATIVE
-    if not path.is_file():
+    if not path.exists() and not path.is_symlink():
         return {}
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
+        raw = load_yaml(path, root)
+    except (OSError, LoaderError) as exc:
         raise LineageError(f"cannot read {LEDGER_RELATIVE}: {exc}") from exc
     if not isinstance(raw, dict):
         raise LineageError(f"{LEDGER_RELATIVE} is not a mapping")
