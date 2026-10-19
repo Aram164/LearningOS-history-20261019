@@ -200,6 +200,8 @@ hidden:
       purpose: ignores generated/*, bases/, and the local environment
 
   ephemeral:
+    - path: .jules
+      purpose: jules agent journal
     - path: .git
       purpose: the git directory itself
       must_be_ignored: false
