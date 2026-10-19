@@ -127,7 +127,8 @@ def interpret_claims(records: Mapping[str, ClaimLineage], revisions: Mapping[str
     return out
 
 
-def _read_yaml(path: Path) -> object:
+def read_optional_yaml(path: Path) -> object:
+    """Read optional semantic evidence, leaving unreadable input unavailable."""
     try:
         return load_yaml(path, path.parent)
     except (OSError, UnicodeError, LoaderError):
@@ -143,7 +144,7 @@ def current_revisions(root: Path) -> dict[str, int]:
 
 def scan_manifest_files(root: Path) -> dict[str, object]:
     """Live materials-manifest files map, or {} when unreadable."""
-    data = _read_yaml(root / "records" / "materials-manifest.yaml")
+    data = read_optional_yaml(root / "records" / "materials-manifest.yaml")
     files = data.get("files") if isinstance(data, dict) else None
     return {str(k): v for k, v in files.items()} if isinstance(files, dict) else {}
 
@@ -251,7 +252,7 @@ def live_evidence_digest(root: Path, key: str, manifest_files: Mapping[str, obje
             repo = load_repo(root) if repo is None else repo
             cache: dict[Path, str] = {}
             basis = current_unit_material_basis(root, unit_id, repo=repo, cache=cache)
-            value = _read_yaml(synthesis_destination(root, unit_id))
+            value = read_optional_yaml(synthesis_destination(root, unit_id))
             if not isinstance(value, dict) or material_synthesis_freshness(
                     root, unit_id, value, repo=repo, cache=cache)["status"] != "current":
                 return None

@@ -120,6 +120,24 @@ def test_a_restart_recovers_the_original_transaction(recovery_run):
     assert receipt["request"]["channel"] == "ui"
 
 
+def test_a_faulted_receipt_publication_stays_unresolved_then_replays(recovery_run):
+    """A real faulted Core response reaches the real UI client (S1).
+
+    Core's receipt-parent sync fails after the receipt is visible; the UI
+    must keep the original envelope blocked, then a restarted instance
+    replays those exact bytes into one canonical effect.
+    """
+    results, mini = recovery_run
+    scenario = results["faultedPublicationReplay"]
+    assert scenario["blocked_phase"] == "blocked"
+    assert scenario["envelope_preserved"] is True
+    assert scenario["identical"] is True
+    assert scenario["replayed"] is True
+    receipt = _receipt(mini, scenario)
+    assert receipt["id"] == scenario["transaction_id"]
+    assert receipt["request"]["idempotency_key"] == scenario["idempotency_key"]
+
+
 def test_a_garden_seed_replays_under_its_request_scoped_guard(recovery_run):
     results, mini = recovery_run
     scenario = results["gardenSeedReplay"]
@@ -162,11 +180,12 @@ def test_every_replay_produces_exactly_one_receipt_and_one_ledger_entry(recovery
     assert len(receipts) == len(results), (
         f"expected one receipt per gesture, found {[p.name for p in receipts]}"
     )
-    # And the canonical files themselves: three captures (two text, one file)
-    # and one Garden seed. Four gestures, four artefacts, no duplicates.
+    # And the canonical files themselves: four captures (three text —
+    # including the faulted-publication replay — and one file) and one
+    # Garden seed. Five gestures, five artefacts, no duplicates.
     inbox = sorted(p.name for p in (mini / "work" / "inbox").iterdir())
     garden = sorted(p.name for p in (mini / "knowledge" / "garden").iterdir())
-    assert len(inbox) == 3, f"one canonical file per capture, found {inbox}"
+    assert len(inbox) == 4, f"one canonical file per capture, found {inbox}"
     assert len(garden) == 1, f"one canonical file per seed, found {garden}"
 
 

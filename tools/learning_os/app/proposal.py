@@ -2,13 +2,61 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-from learning_os.domain.failures import WriteRefused
+from learning_os.domain.failures import Refusal, WriteRefused
 from learning_os.store.contracts.gateway import GatewayRequestContext
+
+
+class CommitFamily(Enum):
+    """The three transaction families the commit boundary actually has.
+
+    Selected by the owning capability, never by the caller: the AI
+    delivery family applies reviewed AI deliveries, the goal family
+    records goal decisions, and everything else is ordinary. The engine
+    refuses a gateway request whose capability does not match the
+    transaction it carries, so a family cannot be substituted at commit
+    time. Mandatory engine phases live in ``TransactionService`` and no
+    family can bypass them.
+    """
+
+    ORDINARY = "ordinary"
+    GOAL = "goal"
+    AI = "ai"
+
+
+def commit_family(capability: str) -> CommitFamily:
+    if capability == "ai-action.delivery.apply":
+        return CommitFamily.AI
+    if capability == "goal.decision.record":
+        return CommitFamily.GOAL
+    return CommitFamily.ORDINARY
+
+
+@dataclass(frozen=True)
+class CommitOutcome:
+    """The typed result of one ``commit_proposal`` call.
+
+    Replaces the bare ``(code, errors, confirmation)`` tuple: the refusal
+    classification travels as a typed :class:`Refusal` instead of through
+    ambient state, and post-commit/uncertain facts stay attached to the
+    outcome that produced them. Iterating yields the legacy three fields
+    so existing three-way call sites keep working unchanged.
+    """
+
+    code: int
+    issues: list
+    confirmation: dict
+    refusal: Refusal | None = None
+
+    def __iter__(self) -> Iterator:
+        yield self.code
+        yield self.issues
+        yield self.confirmation
 
 
 class CommitIssues(list):
@@ -57,6 +105,11 @@ class TransactionProposal:
     translate: Callable[[BaseException], BaseException | None] | None = None
     # The call site's own except-chain around commit; the pipeline raises the
     # translation `from` the original, or re-raises the original when None.
+
+    @property
+    def family(self) -> CommitFamily:
+        """The commit family the owning capability selects for this proposal."""
+        return commit_family(self.capability)
 
 
 @dataclass(frozen=True)

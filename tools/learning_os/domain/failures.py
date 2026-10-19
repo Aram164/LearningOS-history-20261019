@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from itertools import tee
 from pathlib import Path
+from typing import NamedTuple
 
 from learning_os.domain import suggest
 from learning_os.domain.codes import (
@@ -23,6 +24,18 @@ from learning_os.domain.codes import (
     UNCONFIRMED,
     VALIDATION_FAILED,
 )
+
+
+class Refusal(NamedTuple):
+    """One typed gateway refusal: its V2 code and whether it may retry.
+
+    The narrow alternative to carrying a bare ``(code, retryable)`` pair
+    or reconstructing one from prose: producers build this value, and
+    exactly one mapping (``app/outcomes.py``) turns failure types into it.
+    """
+
+    code: str
+    retryable: bool
 
 
 class TransactionFailure(Exception):
@@ -73,6 +86,25 @@ class PostCommitFailure(TransactionFailure):
         self.transaction_id = transaction_id
         self.receipt_path = receipt_path
         self.snapshot_after = snapshot_after
+
+
+class TransactionPublicationUncertain(TransactionFailure):
+    """The receipt may have been published but its durability is unproven.
+
+    Raised when the operation that can expose the receipt fails after
+    uncertainty was marked: the forward state and the recovery journal are
+    preserved, because rolling back behind a possibly committed receipt
+    would contradict evidence a later process can verify. The outcome is
+    ambiguous — never a definitive refusal and never ``committed: true``
+    without proof. Carries the transaction identity so the gateway can
+    report it without asserting a durable receipt.
+    """
+
+    def __init__(self, message: str, *, transaction_id: str,
+                 receipt_path: str):
+        super().__init__(message)
+        self.transaction_id = transaction_id
+        self.receipt_path = receipt_path
 
 
 class TransactionValidationFailure(TransactionFailure):

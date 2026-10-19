@@ -359,6 +359,72 @@ def test_generated_schemas_carry_parser_help_text(repo_root: Path):
     assert carried > 0, "no carried descriptions found; the generator regressed"
 
 
+def test_admission_needs_no_cli_parser_construction(mini_repo: Path):
+    """S3: gateway admission derives its namespace from the request schema.
+
+    With parser construction unavailable (``parser_factory=None``), the
+    shared admission still validates the payload, applies schema
+    defaults, and preserves omitted/null/false/empty semantics — the
+    values a handler would read are the values the schema declares.
+    """
+    from learning_os.app.gateway import prepare_dispatch
+
+    definitions = command_definitions(mini_repo)
+    envelope = {"schema_version": 2}
+    _parser, namespace = prepare_dispatch(
+        mini_repo, definitions["capture.create"], envelope,
+        {"text": "hello"}, parser_factory=None)
+    assert namespace.text == "hello"
+    assert namespace.title is None, "an omitted optional stays its schema default"
+    assert namespace.json is True, "handlers report JSON through the gateway"
+    from learning_os.store.contracts.payloads import (
+        payload_to_namespace_from_schema,
+    )
+
+    namespace = payload_to_namespace_from_schema(
+        mini_repo, "capture.create", {"text": "hello", "title": None},
+        root=None, expected_snapshot=None, expected_revisions=None)
+    assert namespace.title is None, "an explicit null is absence, not a value"
+    _parser, namespace = prepare_dispatch(
+        mini_repo, definitions["stage.progress.update"], envelope,
+        {"unit_id": "u", "stage_id": "s", "status": "active",
+         "progress_summary": ""}, parser_factory=None)
+    assert namespace.progress_summary == "", "an explicit empty string survives"
+    # Refusal order is unchanged: payload validation refuses before any
+    # namespace is built, with or without a parser.
+    with pytest.raises(WriteRefused, match="invalid payload"):
+        prepare_dispatch(
+            mini_repo, definitions["stage.progress.update"], envelope,
+            {"unit_id": "u", "stage_id": "s", "status": "bogus"},
+            parser_factory=None)
+
+
+def test_gateway_dispatch_survives_parser_construction_failure(mini_repo: Path):
+    """A registered capability completes with the parser factory broken."""
+    import learning_os.app.pipeline as pipeline_module
+    from learning_os.store.diagnostics import tracer as diag_tracer
+    from learning_os.store.diagnostics.store import bind_store as _bind_diag_store
+
+    def broken_factory():
+        raise AssertionError("CLI parser construction is unavailable")
+
+    from learning_os.store.contracts.gateway import request_artifact_id
+
+    envelope = approved_v2_envelope(
+        mini_repo, capability="capture.create", payload={"text": "parser-free"},
+        artifact_ids=[request_artifact_id("capture.create", "parser-free-001")],
+        idempotency_key="parser-free-001")
+    _bind_diag_store(mini_repo)
+    attempt = diag_tracer.begin_attempt({"capability": "capture.create"})
+    outcome = pipeline_module.run_gateway(
+        mini_repo, envelope, requested="capture.create",
+        definitions=command_definitions(mini_repo), attempt=attempt,
+        replay_only=False, parser_factory=broken_factory)
+    assert outcome is not None
+    body = json.loads(outcome.stdout)
+    assert body["ok"] is True, body
+
+
 def test_analysis_binding_schemas_describe_the_stored_shape(repo_root: Path):
     """F6: save/save_batch bindings point at material_analysis, bare object no more.
 

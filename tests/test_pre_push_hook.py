@@ -18,10 +18,10 @@ import re
 import shutil
 import subprocess
 import sys
-import sysconfig
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ZERO_SHA = "0" * 40
@@ -90,9 +90,9 @@ def pair(tmp_path: Path, monkeypatch):
     # explicitly, and every other test needs the unset deterministic path.
     monkeypatch.delenv("PYTEST_ADDOPTS", raising=False)
     # The fixture python is a symlink, which does not activate the venv, so
-    # the hook's live-root detector (which needs PyYAML) runs with the
-    # runner's own site-packages on the path instead.
-    monkeypatch.setenv("PYTHONPATH", sysconfig.get_paths()["purelib"])
+    # the hook's live-root detector needs the actual PyYAML dependency path;
+    # an isolated runner may share it from a different interpreter prefix.
+    monkeypatch.setenv("PYTHONPATH", str(Path(yaml.__file__).resolve().parent.parent))
     return {"root": root, "core": core, "ui": ui, "log": log, "env_log": env_log}
 
 

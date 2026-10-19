@@ -31,11 +31,13 @@ from learning_os.domain.codes import (
 from learning_os.domain.failures import (
     PostCommitFailure,
     ProjectionFailure,
+    Refusal,
     ReplayEvidenceError,
     StaleSnapshot,
     TransactionConflict,
     TransactionFailure,
     TransactionIdempotencyConflict,
+    TransactionPublicationUncertain,
     TransactionRecoveryConflict,
     TransactionRollbackIncomplete,
     TransactionScopeError,
@@ -59,21 +61,21 @@ from learning_os.store.legacy_archive import LegacyArchiveError
 #: takes it after a non-zero return. Never reconstructed from prose or
 #: from the exit code: exit 3 alone is ambiguous (a snapshot guard, a
 #: revision conflict, and a stale reviewed digest all use it).
-_GATEWAY_REFUSAL: contextvars.ContextVar[tuple[str, bool] | None] = (
+_GATEWAY_REFUSAL: contextvars.ContextVar[Refusal | None] = (
     contextvars.ContextVar("learningos_gateway_refusal", default=None)
 )
 
 def record_gateway_refusal(code: str, retryable: bool) -> None:
-    """Carry one typed refusal code across the handler's int-exit boundary."""
-    _GATEWAY_REFUSAL.set((code, retryable))
+    """Carry one typed refusal across the handler's int-exit boundary."""
+    _GATEWAY_REFUSAL.set(Refusal(code, retryable))
 
-def take_gateway_refusal() -> tuple[str, bool] | None:
+def take_gateway_refusal() -> Refusal | None:
     """Read and clear the recorded refusal, if any."""
     refusal = _GATEWAY_REFUSAL.get()
     _GATEWAY_REFUSAL.set(None)
     return refusal
 
-def refusal_from_failure(failure: BaseException) -> tuple[str, bool] | None:
+def refusal_from_failure(failure: BaseException) -> Refusal | None:
     """Map a refusal to its V2 ``(code, retryable)`` by type, never by prose.
 
     Returns ``None`` for an untyped refusal, which the gateway reports as
@@ -89,7 +91,7 @@ def refusal_from_failure(failure: BaseException) -> tuple[str, bool] | None:
     resolved = resolve(row, failure)
     if resolved["code"] is None:
         return None
-    return (resolved["code"], resolved["retryable"])
+    return Refusal(resolved["code"], resolved["retryable"])
 
 
 Value = str | bool | int | None
@@ -146,6 +148,10 @@ def _projection_incomplete_details(exc: BaseException) -> dict:
 
 def _commit_details(exc: BaseException) -> dict:
     return {"stage": "core.commit", "committed": True}
+
+
+def _publication_details(exc: BaseException) -> dict:
+    return {"stage": "core.receipt", "publication": "uncertain"}
 
 
 def _deferred_code(exc: BaseException) -> Value:
@@ -205,6 +211,8 @@ TABLE: tuple[Row, ...] = (
         code=VALIDATION_FAILED, retryable=False),
     Row("gateway.refusal", (TransactionRollbackIncomplete,),
         code=INTERNAL_FAILURE, retryable=True),
+    Row("gateway.refusal", (TransactionPublicationUncertain,),
+        code=INTERNAL_FAILURE, retryable=True),
     Row("gateway.refusal", (TransactionFailure,),
         when=lambda exc: exc.pre_existing_defect,
         code=VALIDATION_FAILED, retryable=False),
@@ -246,6 +254,9 @@ TABLE: tuple[Row, ...] = (
     Row("gateway.dispatch", (PostCommitFailure,),
         code=INTERNAL_FAILURE, retryable=True,
         details=_commit_details, close={"stage": "core.commit"}),
+    Row("gateway.dispatch", (TransactionPublicationUncertain,),
+        code=INTERNAL_FAILURE, retryable=True,
+        details=_publication_details, close={"stage": "core.receipt"}),
     Row("gateway.dispatch", (TransactionRecoveryConflict,),
         code=INTERNAL_FAILURE, retryable=False,
         details=_recovery_details, close={"code": INTERNAL_FAILURE}),

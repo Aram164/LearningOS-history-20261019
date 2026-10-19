@@ -7,11 +7,7 @@ bytes for the adapter to write and the process exit.
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +29,7 @@ from learning_os.app.lock import operator_lock as _operator_lock
 from learning_os.app.outcomes import classify, error_object, resolve
 from learning_os.app.outcomes import take_gateway_refusal as _take_gateway_refusal
 from learning_os.app.proposal import (
+    CommitOutcome,
     DeliveryCompletion,
     GatewayDispatch,
     InboxCompletion,
@@ -41,6 +38,12 @@ from learning_os.app.proposal import (
 )
 from learning_os.app.registry import REGISTRY
 from learning_os.app.render import call_renderer
+from learning_os.app.session import (
+    UNPROVABLE_AGGREGATE_LEDGERS,
+)
+from learning_os.app.session import (
+    repair_replayed_session_ownership as _repair_replayed_session_ownership,
+)
 from learning_os.domain.codes import (
     IDEMPOTENCY_CONFLICT,
     INTERNAL_FAILURE,
@@ -52,10 +55,12 @@ from learning_os.domain.codes import (
 from learning_os.domain.failures import (
     PostCommitFailure,
     ProjectionFailure,
+    Refusal,
     ReplayEvidenceError,
     ToolFailure,
     TransactionFailure,
     TransactionIdempotencyConflict,
+    TransactionPublicationUncertain,
     TransactionRecoveryConflict,
     TransactionRollbackIncomplete,
     TransactionSnapshotConflict,
@@ -73,21 +78,8 @@ from learning_os.store.diagnostics import conventions as diag_conventions
 from learning_os.store.diagnostics import tracer as diag_tracer
 from learning_os.store.evidence import (
     replay_for_request,
-    shared_ledgers_canonical,
-    shared_ledgers_proven_since,
 )
 from learning_os.store.fingerprint import canonical_fingerprint
-from learning_os.store.session_ledger import current_session_id as _current_session_id
-from learning_os.store.session_ledger import (
-    load_other_session_ledgers as _load_other_session_ledgers,
-)
-from learning_os.store.session_ledger import load_session_ledger as _load_session_ledger
-from learning_os.store.session_ledger import receipt_released as _receipt_released
-from learning_os.store.session_ledger import row_proven_state as _row_proven_state
-from learning_os.store.session_ledger import session_ledger as _session_ledger
-from learning_os.store.session_ledger import session_path_state as _session_path_state
-from learning_os.store.session_ledger import stamp_session_row as _stamp_session_row
-from learning_os.store.session_ledger import write_session_ledger as _write_session_ledger
 
 
 @dataclass(frozen=True)
@@ -188,7 +180,11 @@ def _commit_with_gesture(ctx, operation: str, result):
         with gateway_request_context(result.gesture), verified_gateway_snapshot(
                 ctx.root, result.gesture.expected_snapshot):
             outcome = commit_proposal(ctx, result.proposal)
-    code, errors, confirmation = outcome
+    if not isinstance(outcome, CommitOutcome):
+        # Test doubles and legacy adapters may still return the plain
+        # three-field shape; normalize it at this one boundary.
+        outcome = CommitOutcome(*outcome)
+    code, errors, confirmation = outcome.code, outcome.issues, outcome.confirmation
     if code:
         if result.proposal.refusal is not None:
             gate_errors, refusal = result.proposal.refusal
@@ -224,7 +220,7 @@ def _commit_with_gesture(ctx, operation: str, result):
         raise PostCommitFailure(str(exc), transaction_id=confirmation["transaction_id"],
             receipt_path=confirmation["receipt_path"],
             snapshot_after=confirmation["snapshot_after"]) from exc
-    return code, errors, confirmation
+    return CommitOutcome(code, errors, confirmation, refusal=outcome.refusal)
 
 
 def run_cli(root: Path, operation: str, args) -> Outcome:
@@ -274,12 +270,15 @@ def _execute_cli(root: Path, operation: str, entry, args) -> Outcome:
                                      record, result.payload.prepared if isinstance(result.payload, ResponsePayload) else result.payload)
                        if entry.render_check is not None else record)
         elif result.proposal is not None:
-            code, commit_errors, confirmation = _commit_with_gesture(ctx, operation, result)
+            committed = _commit_with_gesture(ctx, operation, result)
+            code, commit_errors, confirmation = (
+                committed.code, committed.issues, committed.confirmation)
             if code:
                 _audit_commit_refused(operation, code)
+                ambient = _take_gateway_refusal()
                 error = _classify_failure(code,
                     "; ".join(map(str, commit_errors[:12])) or f"{operation} failed",
-                    refusal=_take_gateway_refusal())
+                    refusal=committed.refusal or ambient)
                 error["details"].update(getattr(commit_errors, "details", {}))
                 return Outcome(commit=commit, ok=False, payload=None, error=error,
                     exit_code=code, receipt=receipt, replayed=replayed, stdout="",
@@ -386,6 +385,8 @@ def _cli_refusal(exc: Exception, *, entry=None, args=None,
     elif isinstance(exc, TransactionRollbackIncomplete) or (
             isinstance(exc, ProjectionFailure) and not exc.rollback_complete):
         commit = "unknown"
+    elif isinstance(exc, TransactionPublicationUncertain):
+        commit = "unknown"
     return Outcome(commit=commit, ok=False, payload=None, error=error,
                    exit_code=resolve(row, exc)["exit"], receipt=receipt,
                    replayed=replayed, stdout=stdout, stderr=stderr)
@@ -393,7 +394,7 @@ def _cli_refusal(exc: Exception, *, entry=None, args=None,
 
 def _classify_failure(code: int, message: str, *,
                       failure: BaseException | None = None,
-                      refusal: tuple[str, bool] | None = None) -> dict:
+                      refusal: Refusal | None = None) -> dict:
     """Turn a failed dispatch into a typed V2 error by type, never by prose.
 
     ``code`` is the handler's exit status, retained for call compatibility
@@ -406,8 +407,7 @@ def _classify_failure(code: int, message: str, *,
     An untyped refusal is ``INVALID_REQUEST``.
     """
     if refusal is not None:
-        refused_code, retryable = refusal
-        return error_object(refused_code, message, retryable=retryable)
+        return error_object(refusal.code, message, retryable=refusal.retryable)
     if failure is not None:
         row = classify(failure, "gateway.refusal")
         if row is not None:
@@ -456,6 +456,15 @@ def _projection_error(exc: ProjectionFailure) -> dict:
 
 def _post_commit_error(exc: PostCommitFailure) -> dict:
     """Committed yet failed: never a definitive refusal."""
+    row = classify(exc, "gateway.dispatch")
+    resolved = resolve(row, exc)
+    return error_object(resolved["code"], str(exc),
+                          retryable=resolved["retryable"],
+                          details=resolved["details"])
+
+
+def _publication_error(exc: TransactionPublicationUncertain) -> dict:
+    """Possibly committed: ambiguous, never a definitive refusal."""
     row = classify(exc, "gateway.dispatch")
     resolved = resolve(row, exc)
     return error_object(resolved["code"], str(exc),
@@ -563,7 +572,7 @@ def _replayed_batch_result(payload: object,
             raise _ReplayRecoveryError(
                 "replayed batch receipt write row is malformed")
         written = row["path"]
-        if written in _UNPROVABLE_AGGREGATE_LEDGERS:
+        if written in UNPROVABLE_AGGREGATE_LEDGERS:
             continue
         if row.get("created") is not True \
                 or not written.startswith("knowledge/notes/") \
@@ -632,240 +641,6 @@ def _replayed_domain_result(root: Path, capability: str,
 # Shared multi-entry ledgers a transaction only ever partially writes. Receipt
 # V2 proves this transaction's own row inside each of them (cross-checked by
 # `replay_for_request`), never their whole byte content — so replay-repair can
-# only carry forward a *prior* row this session already proved by directly
-# observing its own fresh write, never assert one from scratch.
-_UNPROVABLE_AGGREGATE_LEDGERS = (
-    "operations/transactions/revisions.yaml",
-    "operations/transactions/idempotency.yaml",
-)
-
-
-def _is_receipt_committed_in_head(root: Path, receipt_relative: str,
-                                  receipt_bytes: bytes) -> bool:
-    if not (root / ".git").exists():
-        return False
-    env = {
-        key: value for key, value in os.environ.items()
-        if key not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"}
-    }
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(root), "cat-file", "-p", f"HEAD:{receipt_relative}"],
-            capture_output=True, timeout=10,
-            env={**env, "GIT_OPTIONAL_LOCKS": "0"},
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return proc.returncode == 0 and proc.stdout == receipt_bytes
-
-
-def _repair_replayed_session_ownership(root: Path,
-                                       replay: TransactionResult,
-                                       session_id: str | None = None) -> None:
-    """Rebuild ephemeral session ownership from the already-validated receipt.
-
-    A process can die after Receipt V2 and the idempotency ledger are durable
-    but before the temporary learning-session ledger is written.  Exact replay
-    is the recovery boundary, so it also repairs that bookkeeping; otherwise
-    the UI would retire its durable record while ``session-end`` forgot the
-    canonical file the recovered gesture authored.
-
-    This must never simply re-observe the current filesystem and adopt it as
-    the ownership claim: an out-of-band edit between the original commit and
-    this replay would then be laundered into the session's own authorship, and
-    ``session-end`` would happily stage and commit it as though the gateway
-    transaction had written it. Every claim made here is instead the
-    *authored* state Receipt V2 itself proves — ``writes[].sha256_after``, or
-    absence when it is ``null`` (each path already proven safe and canonical
-    by ``replay_for_request``), plus the receipt's own bytes, which this
-    function reads and hashes itself rather than trusting a second party's
-    claim about them. That authored state is compared against the live file;
-    a mismatch anywhere refuses the whole repair before a single byte of the
-    ownership ledger is written, so an existing row is never overwritten with
-    a laundered observation and no replacement ledger is created from an
-    unproven one. A replay whose write is already accounted for — its rows
-    in the session ledger, its receipt committed to Git HEAD or released by
-    `session-end --close` — repairs nothing and so compares nothing.
-    """
-    receipt = replay.receipt
-    if not isinstance(receipt, dict):
-        raise _ReplayRecoveryError(
-            "cannot repair session ownership: replayed evidence carries no receipt"
-        )
-    writes = receipt.get("writes")
-    if not isinstance(writes, list):
-        raise _ReplayRecoveryError(
-            "cannot repair session ownership: replayed receipt writes are malformed"
-        )
-
-    authored: dict[str, dict[str, str]] = {}
-    for row in writes:
-        relative = row.get("path") if isinstance(row, dict) else None
-        if not isinstance(relative, str) or not relative:
-            raise _ReplayRecoveryError(
-                "cannot repair session ownership: replayed receipt path is unsafe"
-            )
-        sha_after = row.get("sha256_after") if isinstance(row, dict) else None
-        if sha_after is None:
-            authored[relative] = {"state": "absent"}
-        elif isinstance(sha_after, str) and re.fullmatch(r"[0-9a-f]{64}", sha_after):
-            authored[relative] = {"state": "file", "sha256": sha_after}
-        else:
-            raise _ReplayRecoveryError(
-                "cannot repair session ownership: replayed receipt write has an "
-                "unproven authored state"
-            )
-
-    try:
-        receipt_bytes = replay.receipt_path.read_bytes()
-        receipt_relative = replay.receipt_path.resolve().relative_to(
-            root.resolve()
-        ).as_posix()
-    except (OSError, ValueError) as exc:
-        raise _ReplayRecoveryError(
-            f"cannot repair session ownership: {exc}"
-        ) from exc
-    authored[receipt_relative] = {
-        "state": "file", "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
-    }
-
-    # The repair runs outside any gateway request context, so ambient
-    # session resolution would land in the default channel's ledger — not
-    # the one the original write recorded. The replayed envelope's sealed
-    # session recovers exactly that ledger; without one, the receipt names
-    # the writing channel, which recovers the channel ledger when no
-    # session is named. A named session still wins: that session is
-    # performing the recovery.
-    origin = receipt.get("request") if isinstance(receipt, dict) else None
-    origin = origin.get("channel") if isinstance(origin, dict) else None
-    if not isinstance(origin, str) or not origin:
-        origin = None
-    session = _current_session_id(channel=origin, explicit=session_id)
-
-    # Nothing is left to repair once the ownership window this write belongs
-    # to has ended: session-end --commit-message committed this exact receipt
-    # to Git HEAD (ownership retired into history; verify the shared ledgers
-    # remain canonically serialized and leave the closed session closed), or
-    # session-end --close released it. Later transactions may have changed
-    # or moved any path it wrote since, so the live tree proves nothing here,
-    # and nothing is written.
-    receipt_sha256 = authored[receipt_relative]["sha256"]
-    in_head = _is_receipt_committed_in_head(root, receipt_relative, receipt_bytes)
-    if not _session_ledger(root, session).is_file():
-        if in_head:
-            if not shared_ledgers_canonical(root):
-                raise _ReplayRecoveryError(
-                    "cannot repair session ownership: "
-                    "operations/transactions/revisions.yaml changed since its recorded transaction"
-                )
-            return
-        if _receipt_released(root, session, receipt_relative, receipt_sha256):
-            return
-        raise _ReplayRecoveryError(
-            "cannot repair session ownership: the session ledger is gone, and this "
-            "receipt cannot prove the bytes of the shared revision and idempotency "
-            "ledgers — reconcile this transaction by hand"
-        )
-    try:
-        envelope = _load_session_ledger(root, session)
-    except WriteRefused as exc:
-        raise _ReplayRecoveryError(
-            f"cannot repair session ownership: {exc}"
-        ) from exc
-    assert envelope is not None  # the missing ledger failed closed above
-    existing = envelope["paths"]
-
-    # The original write's bookkeeping already ran: it records the receipt
-    # together with every path the receipt wrote in one atomic ledger write,
-    # so those rows stand and nothing is written. A later gateway write may
-    # since have moved a path on — its own bookkeeping then proves the live
-    # bytes in a session ledger — but bytes no ledger proves are an
-    # out-of-band edit, and the replay still refuses rather than confirm it.
-    if receipt_relative in existing:
-        # The shared ledgers carry this write's rows only as part of the
-        # whole file, so their proof is the session's recorded row.
-        checks = dict(authored)
-        for ledger_relative in _UNPROVABLE_AGGREGATE_LEDGERS:
-            if ledger_relative in existing:
-                checks.setdefault(ledger_relative, existing[ledger_relative])
-        ledgers = [existing, *_load_other_session_ledgers(root, session).values()]
-        shared_proven: bool | None = None
-        for relative, state in checks.items():
-            live = _session_path_state(root, relative)
-            if live == _row_proven_state(state) or any(
-                    isinstance(rows.get(relative), dict)
-                    and live == _row_proven_state(rows[relative])
-                    for rows in ledgers):
-                continue
-            if relative in _UNPROVABLE_AGGREGATE_LEDGERS:
-                if shared_proven is None:
-                    shared_proven = shared_ledgers_proven_since(
-                        root,
-                        revisions_sha256=(existing.get("operations/transactions/revisions.yaml") or {}).get("sha256"),
-                        idempotency_sha256=(existing.get("operations/transactions/idempotency.yaml") or {}).get("sha256"),
-                    )
-                if shared_proven:
-                    continue
-            raise _ReplayRecoveryError(
-                "cannot repair session ownership: "
-                f"{relative} changed since its recorded transaction"
-            )
-        return
-    if in_head and shared_ledgers_canonical(root):
-        return
-    if _receipt_released(root, session, receipt_relative, receipt_sha256):
-        return
-
-    actor = origin or "unknown"
-    shared_proven = shared_ledgers_proven_since(
-        root,
-        revisions_sha256=(existing.get("operations/transactions/revisions.yaml") or {}).get("sha256"),
-        idempotency_sha256=(existing.get("operations/transactions/idempotency.yaml") or {}).get("sha256"),
-    )
-    for ledger_relative in _UNPROVABLE_AGGREGATE_LEDGERS:
-        proven = existing.get(ledger_relative)
-        if proven is not None:
-            if (
-                _session_path_state(root, ledger_relative) != _row_proven_state(proven)
-                and shared_proven
-            ):
-                authored[ledger_relative] = _stamp_session_row(
-                    root, ledger_relative, actor
-                )
-            else:
-                authored[ledger_relative] = proven
-
-    for relative, state in authored.items():
-        if _session_path_state(root, relative) != _row_proven_state(state):
-            if relative in _UNPROVABLE_AGGREGATE_LEDGERS and shared_proven:
-                continue
-            raise _ReplayRecoveryError(
-                "cannot repair session ownership: "
-                f"{relative} changed since its recorded transaction"
-            )
-
-    merged = dict(existing)
-    merged.update(authored)
-    for relative, state in merged.items():
-        if state.get("channel") and state.get("recorded_at"):
-            continue
-        state["channel"] = actor
-        state["recorded_at"] = _stamp_session_row(
-            root, relative, actor)["recorded_at"]
-    try:
-        # The repair keeps the envelope it found: a replay re-proves the
-        # recorded bytes, so it neither bumps the version nor disturbs the
-        # state, the witness or the recorded SHA.
-        _write_session_ledger(
-            root, merged, session, version=envelope["version"],
-            state=envelope["state"], review=envelope["review"],
-            commit_sha=envelope["commit_sha"])
-    except WriteRefused as exc:
-        raise _ReplayRecoveryError(
-            f"cannot repair replayed session ownership: {exc}"
-        ) from exc
-
-
 def _replay_response(root: Path, envelope: dict,
                      replay: TransactionResult) -> dict:
     receipt_path = replay.receipt_path.relative_to(root).as_posix()
@@ -983,9 +758,11 @@ def _registered_compute(root: Path, operation: str, envelope: dict,
     with ``render_check``.
     """
     entry = REGISTRY[operation]
-    command_parser, namespace = prepare_dispatch(
+    # Registered admission is schema-derived: the CLI parser the adapter
+    # may carry is never constructed on this path (S3).
+    _command_parser, namespace = prepare_dispatch(
         root, definitions[operation], envelope, payload,
-        parser_factory=parser_factory)
+        parser_factory=None)
     properties = request_schema(root, operation).get("properties", {})
     req = {key: value for key, value in vars(namespace).items()
            if key in properties}
@@ -1023,14 +800,18 @@ def _registered_compute(root: Path, operation: str, envelope: dict,
             _audit_diagnostic_failed(operation)
             return 1, {"error": error_text}
         return 0, final
-    code, commit_errors, confirmation = _commit_with_gesture(ctx, operation, res)
+    committed = _commit_with_gesture(ctx, operation, res)
+    code, commit_errors, confirmation = (
+        committed.code, committed.issues, committed.confirmation)
     if code != 0:
         _audit_commit_refused(operation, code)
-        refusal = _take_gateway_refusal()
+        ambient = _take_gateway_refusal()
+        refusal = committed.refusal or ambient
         result = {"error": "; ".join(map(str, commit_errors[:12])),
                   "error_details": getattr(commit_errors, "details", {})}
         if refusal is not None:
-            result["error_code"], result["error_retryable"] = refusal
+            result["error_code"] = refusal.code
+            result["error_retryable"] = refusal.retryable
         return code, result
     _take_gateway_refusal()
     final = _success_payload(res.payload, confirmation)
@@ -1359,6 +1140,24 @@ def run_gateway(root: Path, envelope: dict, *, requested: str, definitions,
             return _finish(
                 attempt, 2, "error", {"stage": "core.projection"},
                 stdout=stdout, stderr=stderr, response=response)
+        except TransactionPublicationUncertain as exc:
+            _audit_failure(envelope.get("capability"), exc)
+            # Ambiguous: the transaction id and receipt path name the
+            # recovery subject, but no snapshot_after is asserted — the
+            # receipt's durability is exactly what is unproven.
+            response = _v2_response(
+                envelope,
+                ok=False,
+                transaction_id=exc.transaction_id,
+                receipt_path=exc.receipt_path,
+                error=_publication_error(exc),
+            )
+            _validate_capability_envelope(root, response, kind="result")
+            stdout.append(json.dumps(response, indent=2, ensure_ascii=False) + "\n")
+            return _finish(
+                attempt, 2, "error", {"stage": "core.receipt"},
+                stdout=stdout, stderr=stderr, response=response,
+                commit="unknown")
         except PostCommitFailure as exc:
             _audit_failure(envelope.get("capability"), exc)
             response = _v2_response(
@@ -1429,7 +1228,7 @@ def run_gateway(root: Path, envelope: dict, *, requested: str, definitions,
         confirmation = result if code == 0 else {}
         complaint = str(result.get("error") or f"{requested} failed")
         carried = result.get("error_code")
-        refusal = (carried, bool(result.get("error_retryable"))) \
+        refusal = Refusal(carried, bool(result.get("error_retryable"))) \
             if isinstance(carried, str) else None
         error = None if code == 0 else _classify_failure(
             code, complaint, failure=failure, refusal=refusal)
@@ -1451,7 +1250,7 @@ def run_gateway(root: Path, envelope: dict, *, requested: str, definitions,
         # TransactionRollbackIncomplete refusal row: no WriteRefused carries
         # it, and it is the row's only producer. The commit outcome is
         # genuinely unknown there.
-        carried_unknown = refusal == (INTERNAL_FAILURE, True)
+        carried_unknown = refusal == Refusal(INTERNAL_FAILURE, True)
         return _finish(
             attempt, _v2_exit_code(code, error),
             "ok" if code == 0 else "error",

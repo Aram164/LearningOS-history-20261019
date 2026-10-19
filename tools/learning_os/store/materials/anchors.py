@@ -102,12 +102,12 @@ def seconds(value: str) -> int:
 
 def parse_transcript(content: bytes) -> Transcript:
     try:
-        text = content.decode("utf-8")
+        document = content.decode("utf-8")
     except UnicodeError as exc:
         raise AnchorError("transcript is not UTF-8") from exc
-    grid_match = re.search(r"(?m)^- window:\s*(\d+)s\s*$", text)
-    video_match = re.search(r"(?m)^- video_id:\s*`?([^`\s]+)`?\s*$", text)
-    duration_match = re.search(rf"(?m)^- duration:\s*({_TIMESTAMP})\s*$", text)
+    grid_match = re.search(r"(?m)^- window:\s*(\d+)s\s*$", document)
+    video_match = re.search(r"(?m)^- video_id:\s*`?([^`\s]+)`?\s*$", document)
+    duration_match = re.search(rf"(?m)^- duration:\s*({_TIMESTAMP})\s*$", document)
     if grid_match is None or video_match is None or duration_match is None:
         raise AnchorError("transcript needs explicit window grid, video_id and duration headers")
     grid = int(grid_match[1])
@@ -115,7 +115,7 @@ def parse_transcript(content: bytes) -> Transcript:
         raise AnchorError("transcript window grid must be positive")
     duration = seconds(duration_match[1])
     windows: list[tuple[int, str]] = []
-    for line in text.splitlines():
+    for line in document.splitlines():
         match = _WINDOW_LINE.fullmatch(line)
         if match:
             start = seconds(match[1])

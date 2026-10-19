@@ -47,7 +47,11 @@ from learning_os.derive.learning_runtime import (
     read_observations,
 )
 from learning_os.derive.semantics.claim_audits import AuditError, AuditRecord, audits_from_ledger
-from learning_os.derive.semantics.claim_status import ClaimStatus, _read_yaml, observe_claims
+from learning_os.derive.semantics.claim_status import (
+    ClaimStatus,
+    observe_claims,
+    read_optional_yaml,
+)
 from learning_os.derive.semantics.goals import (
     CandidateGoal,
     detect_claim_findings,
@@ -84,7 +88,7 @@ def read_goal_ledger(root: Path, *, today: _dt.date | None = None) -> tuple[str,
     """Goal ids Aram already decided. Tolerant: missing or malformed input
     reads as no decisions, so the scan never crashes on operational state
     and never invents a decision nobody recorded."""
-    data = _read_yaml(root / GOAL_LEDGER_RELATIVE)
+    data = read_optional_yaml(root / GOAL_LEDGER_RELATIVE)
     if not isinstance(data, dict):
         return ()
     decisions = data.get("decisions")
@@ -124,7 +128,7 @@ class GoalLedgerObservation:
 
 def observe_goal_ledger(root: Path | str) -> GoalLedgerObservation:
     path = Path(root) / GOAL_LEDGER_RELATIVE
-    value = _read_yaml(path)
+    value = read_optional_yaml(path)
     if value is None and not path.exists() and not path.is_symlink():
         value = {"decisions": {}}
     if value is None:
