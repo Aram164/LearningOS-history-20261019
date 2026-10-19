@@ -82,6 +82,9 @@ def test_scenario_effects(operation: str, case: dict, tmp_path: Path):
         f"no recording for {operation}/{case['id']}: "
         f"{recording_path} — record it only when the kickoff authorizes it")
     recorded = json.loads(recording_path.read_text(encoding="utf-8"))
+    # Dual-read: recordings written before a normalize() family existed
+    # still hold its raw values, so both sides pass through normalize().
+    recorded = scenario_harness.normalize(recorded, tmp_path)
     diff = scenario_harness.compare(recorded, actual)
     assert diff is None, (
         f"behaviour changed for {operation}/{case['id']}:\n{diff}")
@@ -392,6 +395,61 @@ def test_normalize_rejects_incorrect_stream_binding(tmp_path):
             == "SHA1")
     assert stranger in normalized["stderr"]
     assert "SHA1" not in normalized["stderr"]
+
+
+def test_normalize_tokenizes_derived_intent_digests(tmp_path):
+    """Derived intent digests tokenize like TX/KEY/SNAP; relations survive."""
+    intent_a = "sha256:" + "aa" * 32
+    intent_b = "sha256:" + "bb" * 32
+    canonical_hash = "cc" * 32
+    authored_hash = "sha256:" + "dd" * 32
+    recording = _bare_recording(
+        {"ok": True, "note": f"authored {authored_hash} stays"},
+        canonical_changed={"work/inbox/x.md": canonical_hash},
+        receipts=[{"id": "TX9", "type": "transaction-receipt",
+                   "request": {"intent_sha256": intent_a,
+                               "approval": {"subject_sha256": intent_a}},
+                   "writes": [{"path": "work/inbox/x.md",
+                               "sha256_after": canonical_hash,
+                               "sha256_before": None}]}],
+        idempotency_changed={
+            "before": None,
+            "after": {"entries": {
+                "KEY9": {"intent_sha256": intent_a},
+                "KEY8": {"intent_sha256": intent_b}}}})
+    normalized = scenario_harness.normalize(recording, tmp_path)
+    entry_a = normalized["idempotency_changed"]["after"]["entries"]["KEY9"]
+    entry_b = normalized["idempotency_changed"]["after"]["entries"]["KEY8"]
+    assert entry_a["intent_sha256"] == "INTENT1"
+    assert entry_b["intent_sha256"] == "INTENT2"
+    request = normalized["receipts"][0]["request"]
+    assert request["intent_sha256"] == "INTENT1"
+    assert request["approval"]["subject_sha256"] == "INTENT1"
+    # The persisted world and unrelated authored hashes never tokenize.
+    assert normalized["canonical_changed"]["work/inbox/x.md"] == canonical_hash
+    assert normalized["receipts"][0]["writes"][0]["sha256_after"] == canonical_hash
+    assert normalized["stdout_json"]["note"] == f"authored {authored_hash} stays"
+    assert intent_a not in json.dumps(normalized)
+    assert intent_b not in json.dumps(normalized)
+
+
+def test_normalize_tokenizes_only_operations_ledger_row_hashes(tmp_path):
+    """Session-ledger row hashes tokenize only for operations/ files."""
+    ledger_hash = "ab" * 32
+    work_hash = "cd" * 32
+    envelope = {"schema_version": 3, "state": "recording", "paths": {
+        "operations/transactions/TX9.yaml": {
+            "channel": "operator", "sha256": ledger_hash, "state": "file"},
+        "work/x.md": {
+            "channel": "operator", "sha256": work_hash, "state": "file"}}}
+    recording = _bare_recording(
+        {"ok": True},
+        session_ledger_changed={"before": None, "after": envelope})
+    normalized = scenario_harness.normalize(recording, tmp_path)
+    paths = normalized["session_ledger_changed"]["after"]["paths"]
+    assert paths["operations/transactions/TX9.yaml"]["sha256"] == "LEDGER1"
+    assert paths["work/x.md"]["sha256"] == work_hash
+    assert ledger_hash not in json.dumps(normalized)
 
 
 def test_failed_push_live_runs_compare_equal(tmp_path):

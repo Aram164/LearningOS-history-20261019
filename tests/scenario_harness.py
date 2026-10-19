@@ -111,18 +111,43 @@ def compare(recorded: dict, actual: dict) -> str | None:
 # fixture
 # --------------------------------------------------------------------------
 
+_TEMPLATE_ROOT: Path | None = None
+
+
+def _template_root() -> Path:
+    """The rich world built once per process, copied for each case.
+
+    Building the world layers ~25 fixture steps over 241 files (~0.25s);
+    copying the finished tree costs ~0.035s. The builders are
+    deterministic (fixed ids, dates and manifest capture), record no
+    absolute paths, and the per-case git commit happens after the copy,
+    so a copy is indistinguishable from a fresh build in every recording.
+    """
+    global _TEMPLATE_ROOT
+    if _TEMPLATE_ROOT is None:
+        container = Path(tempfile.mkdtemp(prefix="los-rich-world-"))
+        sys.path.insert(0, str(TESTS_DIR))
+        try:
+            from conftest import build_mini_repo
+            from scenario_fixtures import rich_world
+        finally:
+            del sys.path[0]
+        root = build_mini_repo(container)
+        rich_world(root)
+        _TEMPLATE_ROOT = root
+    return _TEMPLATE_ROOT
+
+
 def _build_fixture(name: str, container: Path) -> Path:
     if name != "rich_world":
         raise ValueError(f"unknown scenario fixture: {name}")
-    sys.path.insert(0, str(TESTS_DIR))
-    try:
-        from conftest import build_mini_repo
-        from scenario_fixtures import rich_world
-    finally:
-        del sys.path[0]
-    root = build_mini_repo(container)
-    rich_world(root)
-    return root
+    import shutil
+
+    # The world spans the repository root and its sibling materials tree
+    # (the fixture book lives there), so the copy unit is LearningOS/.
+    template = _template_root()
+    shutil.copytree(template.parent, Path(container) / "LearningOS")
+    return Path(container) / "LearningOS" / "repository"
 
 
 def _git(root: Path, *args: str, env: dict | None = None) -> None:
@@ -731,7 +756,11 @@ def _is_tx_key(name) -> bool:
             and (name in _TX_KEY_NAMES or name.endswith(_TX_KEY_SUFFIX)))
 
 
-def _discover_identities(steps: list) -> tuple[set, set, set]:
+_INTENT_KEY_NAMES = frozenset(
+    {"intent_sha256", "subject_sha256", "approval_subject_sha256"})
+
+
+def _discover_identities(steps: list) -> tuple[set, set, set, set, set]:
     """Identity values per SPEC §5.3 rule 2 (amendments (x) C2 and (z) C8).
 
     A value under a JSON key named ``transaction_id``, ending in
@@ -743,10 +772,21 @@ def _discover_identities(steps: list) -> tuple[set, set, set]:
     details). Parsed stdout JSON, receipts and ledgers are walked; nothing
     is discovered by regex over free text, and no string is classified by
     pattern alone.
+
+    Two derived-digest families follow the same rule: a value under a key
+    named ``intent_sha256``, ``subject_sha256`` or
+    ``approval_subject_sha256`` (a hash of an already-tokenized snapshot
+    and request, so its literal bytes only cascade fixture changes), and
+    the ``sha256`` of a session-ledger ``paths`` row whose path lies under
+    ``operations/`` (that file's content is recorded field-by-field in the
+    receipts and ledgers, so its hash only repeats it). Canonical hashes
+    are never discovered here.
     """
     tx: set[str] = set()
     keys: set[str] = set()
     snaps: set[str] = set()
+    intents: set[str] = set()
+    ledgers: set[str] = set()
 
     def visit(node) -> None:
         if isinstance(node, str):
@@ -776,6 +816,9 @@ def _discover_identities(steps: list) -> tuple[set, set, set]:
                     and isinstance(value, str)
                     and _SHA256_RE.fullmatch(value) is not None):
                 snaps.add(value)
+            elif isinstance(name, str) and name in _INTENT_KEY_NAMES:
+                if isinstance(value, str) and value:
+                    intents.add(value)
             visit(value)
 
     for step in steps:
@@ -787,7 +830,23 @@ def _discover_identities(steps: list) -> tuple[set, set, set]:
                 own = receipt.get("id")
                 if isinstance(own, str) and own:
                     tx.add(own)
-    return tx, keys, snaps
+        changed = step.get("session_ledger_changed")
+        if isinstance(changed, dict):
+            for side in ("before", "after"):
+                envelope = changed.get(side)
+                if not isinstance(envelope, dict):
+                    continue
+                paths = envelope.get("paths")
+                if not isinstance(paths, dict):
+                    continue
+                for row_path, row in paths.items():
+                    if (isinstance(row_path, str)
+                            and row_path.startswith("operations/")
+                            and isinstance(row, dict)
+                            and isinstance(row.get("sha256"), str)
+                            and row["sha256"]):
+                        ledgers.add(row["sha256"])
+    return tx, keys, snaps, intents, ledgers
 
 
 def _ledger_strings(node) -> list[str]:
@@ -933,30 +992,50 @@ def normalize(recording: dict, root: str | Path) -> dict:
             materials, "<MATERIALS>").replace(
             learningos, "<LEARNINGOS>"))
     steps = _single_steps(recording)
-    tx_values, key_values, snap_values = _discover_identities(steps)
-    texts = []
-    for step in steps:
-        texts.append(step.get("stdout", ""))
-        texts.append(step.get("stderr", ""))
-        texts.append(json.dumps(step.get("receipts", []), sort_keys=True))
-    ledger_runs = []
-    for step in steps:
-        for section in ("revisions_changed", "idempotency_changed",
-                        "session_ledger_changed"):
-            ledger_runs.append(_ledger_strings(step.get(section)))
+    tx_values, key_values, snap_values, _, _ = _discover_identities(steps)
+
+    def _texts_and_runs(units: list) -> tuple[list, list]:
+        texts: list = []
+        runs: list = []
+        for step in units:
+            texts.append(step.get("stdout", ""))
+            texts.append(step.get("stderr", ""))
+            texts.append(json.dumps(step.get("receipts", []), sort_keys=True))
+        for step in units:
+            for section in ("revisions_changed", "idempotency_changed",
+                            "session_ledger_changed"):
+                runs.append(_ledger_strings(step.get(section)))
+        return texts, runs
+
+    def _apply(mapping: dict, node: dict) -> dict:
+        def _map(text: str) -> str:
+            # Longest first, so `request-<key>` maps as a unit before `<key>`.
+            for original in sorted(mapping, key=len, reverse=True):
+                if original in text:
+                    text = text.replace(original, mapping[original])
+            return text
+
+        return _walk_strings(node, _map)
+
+    texts, ledger_runs = _texts_and_runs(steps)
     mapping = {}
     mapping.update(_number_family(tx_values, texts, ledger_runs, "TX"))
     mapping.update(_number_family(key_values, texts, ledger_runs, "KEY"))
     mapping.update(_number_family(snap_values, texts, ledger_runs, "SNAP"))
-
-    def _map(text: str) -> str:
-        # Longest first, so `request-<key>` maps as a unit before `<key>`.
-        for original in sorted(mapping, key=len, reverse=True):
-            if original in text:
-                text = text.replace(original, mapping[original])
-        return text
-
-    recording = _walk_strings(recording, _map)
+    recording = _apply(mapping, recording)
+    # Derived digests are discovered and numbered only after the identity
+    # families above are applied: ledger numbering follows first appearance
+    # among session-ledger paths, whose names the TX family rewrites, so
+    # numbering on the raw form would order a live run differently from a
+    # recording that already carries TX tokens. A value already claimed as
+    # an identity is gone by now and keeps that family's token.
+    steps = _single_steps(recording)
+    _, _, _, intent_values, ledger_values = _discover_identities(steps)
+    texts, ledger_runs = _texts_and_runs(steps)
+    derived = {}
+    derived.update(_number_family(intent_values, texts, ledger_runs, "INTENT"))
+    derived.update(_number_family(ledger_values, texts, ledger_runs, "LEDGER"))
+    recording = _apply(derived, recording)
     # D7 SHA family, after the TX/KEY/SNAP map (disjoint values) and
     # before the stream-agnostic elapsed redaction.
     sha_mapping = _discover_commit_shas(_single_steps(recording), root)
