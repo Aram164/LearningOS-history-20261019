@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff>=0.16", "import-linter>=2.1", "mypy"]
+dev = ["pytest", "pytest-xdist>=3", "ruff>=0.16", "import-linter>=2.1", "mypy"]
 
 [project.scripts]
 los = "los:main"

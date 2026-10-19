@@ -12,7 +12,7 @@ VENV   := .venv
 # Homebrew "externally-managed-environment" errors on macOS.
 PY := $(shell [ -x $(VENV)/bin/python ] && echo $(VENV)/bin/python || echo $(PYTHON))
 
-.PHONY: help check warnings views materials inventory verify-materials contract test test-fast test-group test-affected test-paired bench lint code-check typecheck all setup setup-lean scrut hooks garden status plan-check system-check stress clean-derived commit-check
+.PHONY: help check warnings views materials inventory verify-materials contract test test-fast test-group test-affected test-paired test-parallel bench lint code-check typecheck all setup setup-lean scrut hooks garden status plan-check system-check stress clean-derived commit-check
 
 help:
 	@echo "make check  - validate the repository (schemas + semantic rules)"
@@ -33,6 +33,7 @@ help:
 	@echo "make test-group G=<area> - run one area group (see tests/GROUPS.md)"
 	@echo "make test-affected [BASE=main] - run the groups touched by this branch"
 	@echo "make test-paired - run the Core/UI boundary tests (the pre-push gate's UI-only path)"
+	@echo "make test-parallel - run the suite in parallel for fast feedback (zz population files stay serial; never the gate)"
 	@echo "make bench    - run the read-only benchmark scripts (never a gate, no thresholds)"
 	@echo "make test   - run the complete test suite, including full-repository checks"
 	@echo "make lint   - run the defect-oriented static checks used by CI"
@@ -116,6 +117,13 @@ test-affected:
 # paired test carries the live_install mark.
 test-paired:
 	$(PY) -m pytest -q -m "paired"
+
+# Parallel fast feedback (pytest-xdist). The two zz population files are
+# excluded: they aggregate session-wide witness/audit files from the same
+# process, so they only mean anything serially and stay in `make test` /
+# `make system-check`. This target is feedback, never the acceptance gate.
+test-parallel:
+	$(PY) -m pytest -q -n auto --dist loadscope -m "not live_install" --ignore=tests/test_scenarios_zz_refusal_sites.py --ignore=tests/test_scenarios_zz_operational_owners.py
 
 # Discoverability only: the read-only benchmark scripts are noisy by nature,
 # so they are runnable but never a gate and never part of check/CI.

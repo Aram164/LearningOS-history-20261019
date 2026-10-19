@@ -33,11 +33,24 @@ the paired recovery driver (`test_ui_gateway_recovery`) is `gateway`.
 make test-group G=gateway        # one area
 pytest -m "gateway or contracts"  # several areas
 pytest -m "not full_repo"         # make test-fast (unchanged)
+make test-parallel               # fast parallel feedback (see below)
 make test                        # the full suite — still the gate
 ```
 
 `make system-check` and CI always run the full suite. Groups minimise reruns
 during development; they never replace the gate.
+
+## Parallel fast gate
+
+`make test-parallel` runs the suite under pytest-xdist (`-n auto
+--dist loadscope`), excluding the two `test_scenarios_zz_*` population
+files. Those two aggregate session-wide witness/audit files written by the
+scenario cases in the same process, so they only mean anything in a serial
+session; xdist workers each hold a private session and the population
+checks would see a partial population. They remain part of the serial
+`make test` / `make system-check` gate. Everything else is tmp/subprocess
+isolated and parallel-safe. The parallel gate is feedback, not acceptance:
+a green parallel run never substitutes for `make system-check`.
 
 ## Affected mapping
 
