@@ -42,15 +42,22 @@ during development; they never replace the gate.
 
 ## Parallel fast gate
 
-`make test-parallel` runs the suite under pytest-xdist (`-n auto
---dist loadscope`), excluding the two `test_scenarios_zz_*` population
+`make test-parallel` runs the suite under pytest-xdist (`-n $(WORKERS)`,
+default 4 workers, `--dist loadscope`), excluding the two
+`test_scenarios_zz_*` population
 files. Those two aggregate session-wide witness/audit files written by the
 scenario cases in the same process, so they only mean anything in a serial
 session; xdist workers each hold a private session and the population
 checks would see a partial population. They remain part of the serial
 `make test` / `make system-check` gate. Everything else is tmp/subprocess
 isolated and parallel-safe. The parallel gate is feedback, not acceptance:
-a green parallel run never substitutes for `make system-check`.
+a green parallel run never substitutes for `make system-check`. The
+worker cap is a thermal/memory budget, not a throughput setting: keep it
+at 4 on a laptop, or lower it with `make test-parallel WORKERS=2`.
+Batches run sequentially by construction — xdist starts the next test
+only when a worker frees, never all batches at once. The evidence and
+method behind this gate are in
+[TEST-SUITE-EVIDENCE.md](TEST-SUITE-EVIDENCE.md).
 
 ## Affected mapping
 

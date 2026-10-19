@@ -12,6 +12,12 @@ VENV   := .venv
 # Homebrew "externally-managed-environment" errors on macOS.
 PY := $(shell [ -x $(VENV)/bin/python ] && echo $(VENV)/bin/python || echo $(PYTHON))
 
+# Worker cap for `make test-parallel`. Four concurrent xdist workers is
+# the thermal/memory budget for a laptop, not a maximum-throughput
+# setting; lower it (e.g. `make test-parallel WORKERS=2`) on a hot or
+# small machine.
+WORKERS ?= 4
+
 .PHONY: help check warnings views materials inventory verify-materials contract test test-fast test-group test-affected test-paired test-parallel bench lint code-check typecheck all setup setup-lean scrut hooks garden status plan-check system-check stress clean-derived commit-check
 
 help:
@@ -33,7 +39,7 @@ help:
 	@echo "make test-group G=<area> - run one area group (see tests/GROUPS.md)"
 	@echo "make test-affected [BASE=main] - run the groups touched by this branch"
 	@echo "make test-paired - run the Core/UI boundary tests (the pre-push gate's UI-only path)"
-	@echo "make test-parallel - run the suite in parallel for fast feedback (zz population files stay serial; never the gate)"
+	@echo "make test-parallel - run the suite in parallel for fast feedback (WORKERS=4 workers max, zz population files stay serial; never the gate)"
 	@echo "make bench    - run the read-only benchmark scripts (never a gate, no thresholds)"
 	@echo "make test   - run the complete test suite, including full-repository checks"
 	@echo "make lint   - run the defect-oriented static checks used by CI"
@@ -123,7 +129,7 @@ test-paired:
 # process, so they only mean anything serially and stay in `make test` /
 # `make system-check`. This target is feedback, never the acceptance gate.
 test-parallel:
-	$(PY) -m pytest -q -n auto --dist loadscope -m "not live_install" --ignore=tests/test_scenarios_zz_refusal_sites.py --ignore=tests/test_scenarios_zz_operational_owners.py
+	$(PY) -m pytest -q -n $(WORKERS) --dist loadscope -m "not live_install" --ignore=tests/test_scenarios_zz_refusal_sites.py --ignore=tests/test_scenarios_zz_operational_owners.py
 
 # Discoverability only: the read-only benchmark scripts are noisy by nature,
 # so they are runnable but never a gate and never part of check/CI.
@@ -250,9 +256,10 @@ scrut:
 	fi
 
 hooks:
-	install -m 0755 tools/hooks/pre-commit .git/hooks/pre-commit
-	install -m 0755 tools/hooks/post-commit .git/hooks/post-commit
-	install -m 0755 tools/hooks/pre-push .git/hooks/pre-push
+	HOOKS_DIR=`git rev-parse --git-path hooks`; mkdir -p "$$HOOKS_DIR"; \
+	install -m 0755 tools/hooks/pre-commit "$$HOOKS_DIR/pre-commit"; \
+	install -m 0755 tools/hooks/post-commit "$$HOOKS_DIR/post-commit"; \
+	install -m 0755 tools/hooks/pre-push "$$HOOKS_DIR/pre-push"
 	@if [ -d ../obsidian-ui/.git/hooks ]; then \
 		install -m 0755 tools/hooks/pre-push ../obsidian-ui/.git/hooks/pre-push; \
 	fi

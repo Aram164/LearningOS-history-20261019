@@ -456,6 +456,101 @@ def test_normalize_tokenizes_only_operations_ledger_row_hashes(tmp_path):
     assert ledger_hash not in json.dumps(normalized)
 
 
+def test_normalize_never_tokenizes_malformed_intent_digests(tmp_path):
+    """A malformed derived digest stays literal, never a token."""
+    bad_values = [
+        "broken",
+        "",
+        "sha256:" + "aa" * 10,
+        "sha256:" + "AA" * 32,
+        "sha256:" + "gg" * 32,
+        "SHA256:" + "aa" * 32,
+        "aa" * 32,
+    ]
+    for bad in bad_values:
+        recording = _bare_recording(
+            {"ok": True},
+            idempotency_changed={
+                "before": None,
+                "after": {"entries": {"KEY9": {"intent_sha256": bad}}}})
+        normalized = scenario_harness.normalize(recording, tmp_path)
+        value = (normalized["idempotency_changed"]["after"]
+                 ["entries"]["KEY9"]["intent_sha256"])
+        assert value == bad, bad
+        assert "INTENT" not in json.dumps(normalized), bad
+
+
+def test_normalize_distinguishes_valid_from_malformed_digest(tmp_path):
+    """Valid expected vs malformed actual must compare differently."""
+    valid = "sha256:" + "aa" * 32
+
+    def recording(value):
+        return _bare_recording(
+            {"ok": True},
+            idempotency_changed={
+                "before": None,
+                "after": {"entries": {"KEY9": {"intent_sha256": value}}}})
+
+    expected = scenario_harness.normalize(recording(valid), tmp_path)
+    actual = scenario_harness.normalize(recording("broken"), tmp_path)
+    assert scenario_harness.compare(expected, actual) is not None
+
+
+def test_normalize_keeps_canonical_hash_colliding_with_ledger(tmp_path):
+    """A canonical digest equal to a ledger digest stays exact."""
+    shared = "ab" * 32
+    envelope = {"schema_version": 3, "state": "recording", "paths": {
+        "operations/transactions/TX9.yaml": {
+            "channel": "operator", "sha256": shared, "state": "file"}}}
+    recording = _bare_recording(
+        {"ok": True},
+        canonical_changed={"operations/transactions/TX9.yaml": shared},
+        receipts=[{"id": "TX9", "type": "transaction-receipt",
+                   "writes": [{"path": "operations/transactions/TX9.yaml",
+                               "sha256_after": shared,
+                               "sha256_before": None}]}],
+        session_ledger_changed={"before": None, "after": envelope})
+    normalized = scenario_harness.normalize(recording, tmp_path)
+    paths = normalized["session_ledger_changed"]["after"]["paths"]
+    assert list(paths.values())[0]["sha256"] == "LEDGER1"
+    assert list(normalized["canonical_changed"].values()) == [shared]
+    assert normalized["receipts"][0]["writes"][0]["sha256_after"] == shared
+
+
+def test_normalize_detects_request_change_beside_intent_tokens(tmp_path):
+    """A changed request is still detected when its digest tokenizes."""
+
+    def recording(text, intent):
+        return _bare_recording(
+            {"ok": True},
+            receipts=[{"id": "TX9", "type": "transaction-receipt",
+                       "request": {"intent_sha256": intent,
+                                   "payload": {"text": text}}}])
+
+    first = scenario_harness.normalize(
+        recording("original", "sha256:" + "aa" * 32), tmp_path)
+    second = scenario_harness.normalize(
+        recording("altered", "sha256:" + "bb" * 32), tmp_path)
+    diff = scenario_harness.compare(first, second)
+    assert diff is not None
+    assert "altered" in diff
+
+
+def test_normalize_is_stable_on_tokenized_recordings(tmp_path):
+    """Normalizing an already-tokenized recording changes nothing."""
+    recording = _bare_recording(
+        {"ok": True},
+        receipts=[{"id": "TX9", "type": "transaction-receipt",
+                   "request": {"intent_sha256": "sha256:" + "aa" * 32}}],
+        idempotency_changed={
+            "before": None,
+            "after": {"entries": {
+                "KEY9": {"intent_sha256": "sha256:" + "aa" * 32}}}})
+    once = scenario_harness.normalize(recording, tmp_path)
+    assert scenario_harness.normalize(once, tmp_path) == once
+    assert "INTENT1" in json.dumps(once)
+
+
 def test_failed_push_live_runs_compare_equal(tmp_path):
     """D7 end to end: two live failed-push runs normalize identically."""
     doc = scenario_harness.load_case_file(

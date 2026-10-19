@@ -30,12 +30,14 @@ The caller merges file-level context into each case before calling
 from __future__ import annotations
 
 import argparse
+import atexit
 import contextlib
 import copy
 import difflib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -134,6 +136,7 @@ def _template_root() -> Path:
             del sys.path[0]
         root = build_mini_repo(container)
         rich_world(root)
+        atexit.register(shutil.rmtree, container, ignore_errors=True)
         _TEMPLATE_ROOT = root
     return _TEMPLATE_ROOT
 
@@ -141,8 +144,6 @@ def _template_root() -> Path:
 def _build_fixture(name: str, container: Path) -> Path:
     if name != "rich_world":
         raise ValueError(f"unknown scenario fixture: {name}")
-    import shutil
-
     # The world spans the repository root and its sibling materials tree
     # (the fixture book lives there), so the copy unit is LearningOS/.
     template = _template_root()
@@ -758,6 +759,7 @@ def _is_tx_key(name) -> bool:
 
 _INTENT_KEY_NAMES = frozenset(
     {"intent_sha256", "subject_sha256", "approval_subject_sha256"})
+_BARE_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def _discover_identities(steps: list) -> tuple[set, set, set, set, set]:
@@ -817,7 +819,11 @@ def _discover_identities(steps: list) -> tuple[set, set, set, set, set]:
                     and _SHA256_RE.fullmatch(value) is not None):
                 snaps.add(value)
             elif isinstance(name, str) and name in _INTENT_KEY_NAMES:
-                if isinstance(value, str) and value:
+                # Only a well-formed digest is derived evidence; a
+                # malformed value stays literal so it can never be
+                # tokenized into looking valid.
+                if (isinstance(value, str)
+                        and _SHA256_RE.fullmatch(value) is not None):
                     intents.add(value)
             visit(value)
 
@@ -844,7 +850,7 @@ def _discover_identities(steps: list) -> tuple[set, set, set, set, set]:
                             and row_path.startswith("operations/")
                             and isinstance(row, dict)
                             and isinstance(row.get("sha256"), str)
-                            and row["sha256"]):
+                            and _BARE_SHA256_RE.fullmatch(row["sha256"])):
                         ledgers.add(row["sha256"])
     return tx, keys, snaps, intents, ledgers
 
@@ -1035,7 +1041,29 @@ def normalize(recording: dict, root: str | Path) -> dict:
     derived = {}
     derived.update(_number_family(intent_values, texts, ledger_runs, "INTENT"))
     derived.update(_number_family(ledger_values, texts, ledger_runs, "LEDGER"))
-    recording = _apply(derived, recording)
+
+    def _derived_walk(node):
+        # Position-aware: canonical digests stay exact even when the same
+        # value is also a derived digest elsewhere in the recording.
+        if isinstance(node, dict):
+            out = {}
+            for name, value in node.items():
+                if name == "canonical_changed" or name in (
+                        "sha256_after", "sha256_before"):
+                    out[name] = value
+                else:
+                    out[name] = _derived_walk(value)
+            return out
+        if isinstance(node, list):
+            return [_derived_walk(item) for item in node]
+        if isinstance(node, str):
+            for original in sorted(derived, key=len, reverse=True):
+                if original in node:
+                    node = node.replace(original, derived[original])
+            return node
+        return node
+
+    recording = _derived_walk(recording)
     # D7 SHA family, after the TX/KEY/SNAP map (disjoint values) and
     # before the stream-agnostic elapsed redaction.
     sha_mapping = _discover_commit_shas(_single_steps(recording), root)

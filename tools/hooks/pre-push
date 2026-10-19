@@ -127,7 +127,9 @@ if [ -n "$mismatch" ]; then
 fi
 
 for repo in "$core" "$ui"; do
-    if [ ! -d "$repo/.git" ]; then
+    # Ask Git itself: in a linked worktree `.git` is a file, not a
+    # directory, so a `-d` test would report every worktree missing.
+    if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
         echo "pre-push: paired repository is missing: $repo" >&2
         exit 1
     fi
