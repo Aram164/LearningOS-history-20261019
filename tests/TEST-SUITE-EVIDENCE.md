@@ -74,6 +74,32 @@ other `test_normalize_*` tests in `test_scenarios_effects.py`.
   benchmark pair. The honest claim is that parallel feedback is several
   times faster while the serial gate remains authoritative.
 
+## Integrated verification (hardened pair, 2026-10-19)
+
+Branch `test-suite/integration-hardened-2026-10-19`: hardened Core
+`aab5f24e` plus the test-suite commits, against UI `60214f0b`.
+
+- All 20 `test_normalize_*` tests pass, including the five new negative
+  controls (malformed digests, valid-vs-malformed, canonical collision,
+  request-change detection, token stability).
+- Serial scenario population: 1,787 passed, 1 skipped in 20m58s.
+- `make test-parallel` (4 workers): 7,309 passed, 4 skipped, 2 xfailed
+  in 12m25s.
+- `make system-check`: 7,933 passed, 5 skipped, 2 xfailed, and one
+  failure in 51m06s — `test_perimeter.py::
+  test_every_pending_disposition_entry_is_still_on_disk`. That test
+  resolves the wrapper root as the repository's grandparent and
+  expects `HANDOFF.md`/`original_research.txt` there; in a workbench
+  worktree layout they are absent. It fails identically on the older
+  published test-suite branch in the same layout and passes in the
+  main checkout layout, so it is a pre-existing layout limitation, not
+  an integration regression. The UI check then ran separately and
+  passed (12,750 differential cases; deterministic build). The
+  verified-pair stamp was not taken, because the serial gate did not
+  complete green in this layout.
+- Real-Obsidian and raw-vault restoration obligations (C3) remain open
+  and are not certified by any of these runs.
+
 ## What was not changed
 
 No test was deleted or thinned. `make system-check` is unchanged and
